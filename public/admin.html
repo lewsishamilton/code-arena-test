@@ -225,6 +225,78 @@
       background: var(--info);
       color: #0c130b;
     }
+    /* Lockdown Rule Toggle Cards */
+    .lockdown-rules-deck {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      width: 100%;
+    }
+    .rule-card {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      user-select: none;
+    }
+    .rule-card:hover {
+      border-color: rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .rule-card.active {
+      border-color: rgba(42, 180, 6, 0.5);
+      background: rgba(42, 180, 6, 0.08);
+    }
+    .rule-card.disabled {
+      border-color: rgba(229, 96, 79, 0.35);
+      background: rgba(229, 96, 79, 0.05);
+      opacity: 0.85;
+    }
+    .rule-card-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      overflow: hidden;
+    }
+    .rule-card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .rule-card-desc {
+      font-size: 11px;
+      color: var(--text-2);
+      line-height: 1.3;
+    }
+    .rule-badge {
+      font-size: 10px;
+      font-weight: 700;
+      font-family: var(--mono);
+      padding: 3px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .rule-badge-on {
+      background: rgba(42, 180, 6, 0.2);
+      color: var(--accent);
+      border: 1px solid rgba(42, 180, 6, 0.4);
+    }
+    .rule-badge-off {
+      background: rgba(229, 96, 79, 0.2);
+      color: var(--danger-text);
+      border: 1px solid rgba(229, 96, 79, 0.4);
+    }
     .badge-solved {
       display: inline-block;
       padding: 2px 7px;
@@ -486,6 +558,55 @@
       </div>
       <div>
         <button class="btn btn-danger-sm" id="btn-wipe-contest" style="padding:6px 14px;">⚠️ Reset All Contest Submissions</button>
+      </div>
+    </div>
+
+    <!-- Live Lockdown & Detection Rules Bar -->
+    <div class="deck-section" style="padding-top:14px; border-top:1px solid var(--border); flex-direction:column; align-items:stretch; gap:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div class="deck-title" style="display:flex; align-items:center; gap:6px;">
+          <span>🛡️ Lockdown Detection Rules</span>
+          <span class="muted small" style="text-transform:none; font-weight:normal; margin-left:6px;">(Click any card to toggle ON / OFF live — syncs instantly to all students)</span>
+        </div>
+        <span id="rules-sync-indicator" class="muted small" style="font-family:var(--mono);">Syncing…</span>
+      </div>
+
+      <div class="lockdown-rules-deck">
+        <!-- Rule 1: Window Blur -->
+        <div class="rule-card active" id="card-rule-blur" title="Click to toggle Window Blur detection">
+          <div class="rule-card-info">
+            <span class="rule-card-title"><span>🪟</span> Window Blur / Unfocus</span>
+            <span class="rule-card-desc">Clicking taskbar, Wi-Fi menu, or switching apps</span>
+          </div>
+          <span class="rule-badge rule-badge-on" id="badge-rule-blur">ON</span>
+        </div>
+
+        <!-- Rule 2: Tab Switch -->
+        <div class="rule-card active" id="card-rule-tab" title="Click to toggle Tab Switch detection">
+          <div class="rule-card-info">
+            <span class="rule-card-title"><span>📑</span> Tab Switch & Minimize</span>
+            <span class="rule-card-desc">Opening new browser tabs or minimizing browser</span>
+          </div>
+          <span class="rule-badge rule-badge-on" id="badge-rule-tab">ON</span>
+        </div>
+
+        <!-- Rule 3: DevTools Keys -->
+        <div class="rule-card active" id="card-rule-devtools" title="Click to toggle DevTools detection">
+          <div class="rule-card-info">
+            <span class="rule-card-title"><span>🔍</span> DevTools Shortcuts</span>
+            <span class="rule-card-desc">Pressing F12, Ctrl+Shift+I, or right-click inspect</span>
+          </div>
+          <span class="rule-badge rule-badge-on" id="badge-rule-devtools">ON</span>
+        </div>
+
+        <!-- Rule 4: Fullscreen Exit -->
+        <div class="rule-card disabled" id="card-rule-fullscreen" title="Click to toggle Strict Fullscreen Enforcement">
+          <div class="rule-card-info">
+            <span class="rule-card-title"><span>🖥️</span> Require Fullscreen</span>
+            <span class="rule-card-desc">Block contestant immediately if they exit fullscreen</span>
+          </div>
+          <span class="rule-badge rule-badge-off" id="badge-rule-fullscreen">OFF</span>
+        </div>
       </div>
     </div>
   </section>
@@ -975,6 +1096,9 @@
 
     if (contestState.announcement) {
       document.getElementById('announcement-input').value = contestState.announcement;
+    }
+    if (contestState.lockdownPolicy) {
+      updateLockdownPolicyUI(contestState.lockdownPolicy);
     }
   }
 
@@ -1744,6 +1868,82 @@
     soundAlertEnabled = !soundAlertEnabled;
     btnSound.textContent = soundAlertEnabled ? '🔊 Alert Chime: ON' : '🔈 Alert Chime: OFF';
     toast(soundAlertEnabled ? 'Audible alert chime enabled' : 'Audible alert chime silenced', 'info');
+  });
+
+  // Lockdown Policy Management
+  let currentLockdownPolicy = {
+    blockBlur: true,
+    blockTab: true,
+    blockDevtools: true,
+    blockFullscreen: false
+  };
+
+  function updateLockdownPolicyUI(policy) {
+    if (!policy) return;
+    currentLockdownPolicy = { ...currentLockdownPolicy, ...policy };
+
+    const syncEl = document.getElementById('rules-sync-indicator');
+    if (syncEl) syncEl.textContent = 'Synced with Arena';
+
+    const updateCard = (cardId, badgeId, isEnabled) => {
+      const card = document.getElementById(cardId);
+      const badge = document.getElementById(badgeId);
+      if (!card || !badge) return;
+      if (isEnabled) {
+        card.className = 'rule-card active';
+        badge.className = 'rule-badge rule-badge-on';
+        badge.textContent = 'ON';
+      } else {
+        card.className = 'rule-card disabled';
+        badge.className = 'rule-badge rule-badge-off';
+        badge.textContent = 'OFF';
+      }
+    };
+
+    updateCard('card-rule-blur', 'badge-rule-blur', currentLockdownPolicy.blockBlur);
+    updateCard('card-rule-tab', 'badge-rule-tab', currentLockdownPolicy.blockTab);
+    updateCard('card-rule-devtools', 'badge-rule-devtools', currentLockdownPolicy.blockDevtools);
+    updateCard('card-rule-fullscreen', 'badge-rule-fullscreen', currentLockdownPolicy.blockFullscreen);
+  }
+
+  async function toggleLockdownRule(ruleKey, ruleName) {
+    currentLockdownPolicy[ruleKey] = !currentLockdownPolicy[ruleKey];
+    updateLockdownPolicyUI(currentLockdownPolicy);
+
+    const syncEl = document.getElementById('rules-sync-indicator');
+    if (syncEl) syncEl.textContent = 'Updating…';
+
+    try {
+      const res = await api('/api/admin/lockdown/policy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(currentLockdownPolicy)
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.policy) updateLockdownPolicyUI(json.policy);
+        const stateWord = currentLockdownPolicy[ruleKey] ? 'ENABLED' : 'DISABLED';
+        toast(`🛡️ ${ruleName} is now ${stateWord} for all contestants`, currentLockdownPolicy[ruleKey] ? 'ok' : 'info');
+      } else {
+        toast(`Failed to update ${ruleName}`, 'bad');
+      }
+    } catch (e) {
+      toast(`Network error updating rule: ${e}`, 'bad');
+    }
+  }
+
+  // Wire rule card click listeners
+  document.getElementById('card-rule-blur')?.addEventListener('click', () => {
+    toggleLockdownRule('blockBlur', 'Window Unfocus (Blur) detection');
+  });
+  document.getElementById('card-rule-tab')?.addEventListener('click', () => {
+    toggleLockdownRule('blockTab', 'Tab Switch & Minimize detection');
+  });
+  document.getElementById('card-rule-devtools')?.addEventListener('click', () => {
+    toggleLockdownRule('blockDevtools', 'DevTools shortcut detection');
+  });
+  document.getElementById('card-rule-fullscreen')?.addEventListener('click', () => {
+    toggleLockdownRule('blockFullscreen', 'Strict Fullscreen requirement');
   });
 
   // Projector Toggle

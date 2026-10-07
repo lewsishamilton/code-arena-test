@@ -495,8 +495,19 @@ function setupFullscreenMonitor() {
   if (fullscreenMonitorSetup) return;
   fullscreenMonitorSetup = true;
 
-  document.addEventListener('fullscreenchange', updateFullscreenUI);
-  document.addEventListener('webkitfullscreenchange', updateFullscreenUI);
+  const handleFsChange = () => {
+    updateFullscreenUI();
+    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    if (!isFs && A?.session && !$('#screen-arena')?.hidden && !A.lockdownViolated && !A.kicked) {
+      const pol = A.lockdownPolicy || {};
+      if (pol.blockFullscreen && typeof triggerBrowserViolation === 'function') {
+        triggerBrowserViolation('fullscreen-escape', 'Contestant exited required fullscreen exam mode');
+      }
+    }
+  };
+
+  document.addEventListener('fullscreenchange', handleFsChange);
+  document.addEventListener('webkitfullscreenchange', handleFsChange);
 
   $('#fullscreen-btn')?.addEventListener('click', toggleFullscreen);
   $('#btn-banner-fullscreen')?.addEventListener('click', requestFullscreenSafely);
@@ -596,6 +607,7 @@ async function handleLockdownViolation(violation) {
 }
 
 let lockdownListenersAttached = false;
+let triggerBrowserViolation = null;
 
 function initLockdown() {
   // 1. Electron lockdown bridge (when running in standalone desktop app)
@@ -609,13 +621,20 @@ function initLockdown() {
   if (CONFIG.lockdown?.detectBlurInBrowser && !lockdownListenersAttached) {
     lockdownListenersAttached = true;
 
-    const triggerBrowserViolation = (type, detail) => {
+    triggerBrowserViolation = (type, detail) => {
       // Only monitor active contestants currently inside the arena
       if (!A?.session || !$('#screen-arena') || $('#screen-arena').hidden) return;
       if (A.lockdownViolated || A.kicked) return;
 
       // Grace period: allow 2.5s after entering arena for initial layout and focus settling
       if (A.enteredAt && Date.now() - A.enteredAt < 2500) return;
+
+      // Check dynamic live lockdown policy from admin
+      const pol = A.lockdownPolicy || { blockBlur: true, blockTab: true, blockDevtools: true, blockFullscreen: false };
+      if (type === 'window-blur' && pol.blockBlur === false) return;
+      if (type === 'tab-switch' && pol.blockTab === false) return;
+      if (type === 'devtools-shortcut' && pol.blockDevtools === false) return;
+      if (type === 'fullscreen-escape' && pol.blockFullscreen === false) return;
 
       handleLockdownViolation({
         type: type || 'window-blur',
@@ -690,6 +709,10 @@ async function pollScoreboard() {
 }
 
 function handleContestState(state) {
+  if (state.lockdownPolicy) {
+    A.lockdownPolicy = state.lockdownPolicy;
+  }
+
   if (state.isKicked) {
     if (!A.kicked) {
       A.kicked = true;

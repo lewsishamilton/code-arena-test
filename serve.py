@@ -235,7 +235,11 @@ def init_db():
             "extra_time_min": "0",
             "end_time": str(now_ms + dur * 60000),
             "announcement": "",
-            "paused_time_left_ms": "0"
+            "paused_time_left_ms": "0",
+            "lockdown_block_blur": "true",
+            "lockdown_block_tab": "true",
+            "lockdown_block_devtools": "true",
+            "lockdown_block_fullscreen": "false"
         }
         for k, v in defaults.items():
             ph = "%s" if db.is_postgres else "?"
@@ -245,6 +249,35 @@ def init_db():
 # =============================================================================
 # CONTEST STATE & PROCTOR CONTROLS
 # =============================================================================
+
+def get_lockdown_policy():
+    with _lock:
+        state_rows = db.query_all("SELECT key, value FROM contest_state WHERE key LIKE 'lockdown_%'")
+        state = dict(state_rows)
+        return {
+            "blockBlur": state.get("lockdown_block_blur", "true").lower() in ("true", "1"),
+            "blockTab": state.get("lockdown_block_tab", "true").lower() in ("true", "1"),
+            "blockDevtools": state.get("lockdown_block_devtools", "true").lower() in ("true", "1"),
+            "blockFullscreen": state.get("lockdown_block_fullscreen", "false").lower() in ("true", "1")
+        }
+
+
+def update_lockdown_policy(policy):
+    with _lock:
+        mapping = {
+            "lockdown_block_blur": "true" if policy.get("blockBlur", True) else "false",
+            "lockdown_block_tab": "true" if policy.get("blockTab", True) else "false",
+            "lockdown_block_devtools": "true" if policy.get("blockDevtools", True) else "false",
+            "lockdown_block_fullscreen": "true" if policy.get("blockFullscreen", False) else "false",
+        }
+        for k, v in mapping.items():
+            db.execute(
+                "INSERT INTO contest_state (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                (k, v),
+                commit=True
+            )
+    return get_lockdown_policy()
+
 
 def get_contest_state(roll=None):
     with _lock:
@@ -296,7 +329,8 @@ def get_contest_state(roll=None):
         "endTime": end_time,
         "announcement": announcement,
         "now": now_ms,
-        "timeLeftMs": time_left
+        "timeLeftMs": time_left,
+        "lockdownPolicy": get_lockdown_policy()
     }
     if roll:
         res["isKicked"] = is_kicked
@@ -406,6 +440,18 @@ def get_kicked_users():
 def record_security_violation(roll, name="", event_type="window-blur", detail="Left exam window", timestamp=None, ip=""):
     roll_up = str(roll).strip().upper()
     ts = timestamp or int(time.time() * 1000)
+    policy = get_lockdown_policy()
+
+    # If the admin disabled blocking for this specific event type, record as ignored and do not kick
+    if event_type == "window-blur" and not policy.get("blockBlur", True):
+        return {"ok": True, "blocked": False, "ignored": True, "reason": "Window blur detection disabled by admin"}
+    if event_type == "tab-switch" and not policy.get("blockTab", True):
+        return {"ok": True, "blocked": False, "ignored": True, "reason": "Tab switch detection disabled by admin"}
+    if event_type == "devtools-shortcut" and not policy.get("blockDevtools", True):
+        return {"ok": True, "blocked": False, "ignored": True, "reason": "DevTools detection disabled by admin"}
+    if event_type == "fullscreen-escape" and not policy.get("blockFullscreen", False):
+        return {"ok": True, "blocked": False, "ignored": True, "reason": "Fullscreen escape detection disabled by admin"}
+
     with _lock:
         db.execute("""
             INSERT INTO security_violations (roll, name, event_type, detail, timestamp, ip, status)
@@ -1246,6 +1292,12 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json(HTTPStatus.UNAUTHORIZED, {"error": "Admin password required"})
             return self.json(HTTPStatus.OK, {"kicked": get_kicked_users()})
 
+        # Admin Lockdown Policy
+        if req_path == "/api/admin/lockdown/policy":
+            if not self.is_admin():
+                return self.json(HTTPStatus.UNAUTHORIZED, {"error": "Admin password required"})
+            return self.json(HTTPStatus.OK, {"policy": get_lockdown_policy()})
+
         # Admin Question Management
         if req_path == "/api/admin/questions":
             if not self.is_admin():
@@ -1393,6 +1445,17 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.json(HTTPStatus.BAD_REQUEST, {"error": "invalid JSON"})
             msg = payload.get("announcement", "")
             return self.json(HTTPStatus.OK, set_announcement(msg))
+
+        # Admin Update Lockdown Policy
+        if req_path == "/api/admin/lockdown/policy":
+            if not self.is_admin():
+                return self.json(HTTPStatus.UNAUTHORIZED, {"error": "Admin password required"})
+            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                payload = json.loads(self.rfile.read(length))
+            except Exception:
+                return self.json(HTTPStatus.BAD_REQUEST, {"error": "invalid JSON"})
+            return self.json(HTTPStatus.OK, {"ok": True, "policy": update_lockdown_policy(payload)})
 
         # Admin Wipe / Reset Contest
         if req_path == "/api/admin/reset":
