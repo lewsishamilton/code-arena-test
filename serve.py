@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import sqlite3
@@ -55,6 +56,7 @@ MAX_JUDGE_BODY = 10 * 1024 * 1024
 _lock = threading.Lock()
 _builds_lock = threading.Lock()
 _builds_cache = {}
+_java_source_cache = {}
 
 
 # =============================================================================
@@ -900,9 +902,15 @@ def java_ping():
             with urllib.request.urlopen(req, timeout=4) as resp:
                 if resp.status == 200:
                     data = json.loads(resp.read().decode("utf-8"))
-                    return {"available": True, "version": data.get("version", "Java 21 (Cloud Run)"), "remote": True, "remoteUrl": remote_url}
+                    return {
+                        "ok": True,
+                        "available": True,
+                        "version": data.get("version", "Java 21 (Cloud Run)"),
+                        "remote": True,
+                        "remoteUrl": remote_url
+                    }
         except Exception as e:
-            return {"available": False, "error": f"Remote judge unreachable: {e}", "remote": True}
+            return {"ok": False, "available": False, "error": f"Remote judge unreachable: {e}", "remote": True}
 
     have_javac = shutil.which("javac") is not None
     have_java = shutil.which("java") is not None
@@ -913,10 +921,26 @@ def java_ping():
             version = (p.stderr or p.stdout).splitlines()[0] if (p.stderr or p.stdout) else ""
         except Exception:
             pass
-    return {"available": bool(have_javac and have_java), "version": version, "javac": have_javac, "java": have_java, "remote": False}
+    avail = bool(have_javac and have_java)
+    return {
+        "ok": avail,
+        "available": avail,
+        "version": version or "Java 21",
+        "javac": have_javac,
+        "java": have_java,
+        "remote": False
+    }
+
+
+def normalize_java_source(source: str) -> str:
+    if not source:
+        return ""
+    # Convert public class/interface/enum/record to package-private so javac allows any class name in Solution.java
+    return re.sub(r'\bpublic\s+(class|interface|enum|record)\b', r'\1', source)
 
 
 def compile_java(source: str):
+    source = normalize_java_source(source)
     source_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
     with _builds_lock:
         if source_hash in _builds_cache:
@@ -1005,10 +1029,123 @@ def run_java_test(build_info, input_text: str, time_limit_ms: int = 2000):
 
 
 def handle_java_judge(payload: dict):
+    action = payload.get("action", "")
+    source = payload.get("source", "")
+    clean_source = normalize_java_source(source)
     remote_url = os.environ.get("JAVA_JUDGE_URL", "").strip()
+
+    # -------------------------------------------------------------
+    # 1. ACTION: compile
+    # -------------------------------------------------------------
+    if action == "compile":
+        if not source.strip():
+            return {"ok": False, "log": "Empty source code"}
+
+        art_id = f"art_{hashlib.sha256(source.encode()).hexdigest()[:16]}"
+        with _builds_lock:
+            _java_source_cache[art_id] = clean_source
+
+        if remote_url:
+            try:
+                req_data = json.dumps({"source": clean_source, "tests": []}).encode("utf-8")
+                req = urllib.request.Request(
+                    remote_url,
+                    data=req_data,
+                    headers={"Content-Type": "application/json", "User-Agent": "CodeArena-VM"}
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    if data.get("verdict") == "CE":
+                        return {"ok": False, "log": data.get("compileError", "Compilation error")}
+                    return {"ok": True, "artifactId": art_id, "log": ""}
+            except Exception as e:
+                print(f"⚠️ [JUDGE] Remote compile failed ({remote_url}): {e}")
+                if not (shutil.which("javac") and shutil.which("java")):
+                    return {"ok": False, "log": f"Java judge unavailable: {e}"}
+
+        # Local compile fallback
+        cres = compile_java(clean_source)
+        if not cres.get("ok"):
+            return {"ok": False, "log": cres.get("error", "Compilation failed")}
+        return {"ok": True, "artifactId": cres.get("buildId", art_id), "log": ""}
+
+    # -------------------------------------------------------------
+    # 2. ACTION: run
+    # -------------------------------------------------------------
+    if action == "run":
+        art_id = payload.get("artifactId", "")
+        with _builds_lock:
+            src = payload.get("source") or _java_source_cache.get(art_id, "")
+        clean_src = normalize_java_source(src)
+        if not clean_src:
+            return {"status": "RE", "stdout": "", "stderr": "Source code not found for artifact", "timeMs": 0}
+
+        inp = payload.get("input", "")
+        time_limit_ms = int(payload.get("timeLimitMs") or 2000)
+
+        if remote_url:
+            try:
+                req_data = json.dumps({
+                    "source": clean_src,
+                    "tests": [{"input": inp}],
+                    "timeLimitMs": time_limit_ms
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    remote_url,
+                    data=req_data,
+                    headers={"Content-Type": "application/json", "User-Agent": "CodeArena-VM"}
+                )
+                with urllib.request.urlopen(req, timeout=max(5, (time_limit_ms / 1000.0) + 10)) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    verdict = data.get("verdict", "RE")
+                    time_ms = round(data.get("timeMs", 0))
+
+                    if verdict in ("AC", "WA"):
+                        return {"status": "OK", "stdout": data.get("got", ""), "stderr": "", "timeMs": time_ms}
+                    elif verdict == "TLE":
+                        return {"status": "TLE", "stdout": "", "stderr": data.get("error", "Time Limit Exceeded"), "timeMs": time_limit_ms}
+                    elif verdict == "CE":
+                        return {"status": "CE", "stdout": "", "stderr": data.get("compileError", "Compilation error"), "timeMs": 0}
+                    else:
+                        return {"status": "RE", "stdout": "", "stderr": data.get("error", "Runtime error"), "timeMs": time_ms}
+            except Exception as e:
+                print(f"⚠️ [JUDGE] Remote run failed ({remote_url}): {e}")
+                if not (shutil.which("javac") and shutil.which("java")):
+                    return {"status": "RE", "stdout": "", "stderr": f"Cloud Run execution failed: {e}", "timeMs": 0}
+
+        # Local run fallback
+        cres = compile_java(clean_src)
+        if not cres.get("ok"):
+            return {"status": "CE", "stdout": "", "stderr": cres.get("error", "Compilation failed"), "timeMs": 0}
+        run_res = run_java_test(cres, inp, time_limit_ms)
+        if run_res.get("ok"):
+            return {"status": "OK", "stdout": run_res.get("stdout", ""), "stderr": "", "timeMs": round(run_res.get("timeMs", 0))}
+        else:
+            verdict = run_res.get("verdict", "RE")
+            return {"status": verdict, "stdout": "", "stderr": run_res.get("error", ""), "timeMs": round(run_res.get("timeMs", 0))}
+
+    # -------------------------------------------------------------
+    # 3. ACTION: clean
+    # -------------------------------------------------------------
+    if action == "clean":
+        art_id = payload.get("artifactId", "")
+        with _builds_lock:
+            _java_source_cache.pop(art_id, None)
+        return {"ok": True}
+
+    # -------------------------------------------------------------
+    # 4. BATCH MODE (source + tests)
+    # -------------------------------------------------------------
+    tests = payload.get("tests", [])
+    time_limit_ms = int(payload.get("timeLimitMs") or 2000)
+
     if remote_url:
         try:
-            req_data = json.dumps(payload).encode("utf-8")
+            req_data = json.dumps({
+                "source": clean_source,
+                "tests": tests,
+                "timeLimitMs": time_limit_ms
+            }).encode("utf-8")
             req = urllib.request.Request(
                 remote_url,
                 data=req_data,
@@ -1017,20 +1154,17 @@ def handle_java_judge(payload: dict):
             with urllib.request.urlopen(req, timeout=35) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except Exception as e:
-            print(f"⚠️ [JUDGE] Remote Java Judge error ({remote_url}): {e}")
+            print(f"⚠️ [JUDGE] Remote batch judge error ({remote_url}): {e}")
             return {
                 "ok": True,
                 "verdict": "NJ",
                 "error": f"Cloud Run Java Judge unavailable: {e}",
                 "passed": 0,
-                "total": len(payload.get("tests", []))
+                "total": len(tests)
             }
 
-    source = payload.get("source", "")
-    tests = payload.get("tests", [])
-    time_limit_ms = int(payload.get("timeLimitMs") or 2000)
-
-    cres = compile_java(source)
+    # Local batch execution fallback
+    cres = compile_java(clean_source)
     if not cres.get("ok"):
         return {"ok": True, "verdict": "CE", "compileError": cres.get("error", "Compilation failed"), "passed": 0, "total": len(tests)}
 

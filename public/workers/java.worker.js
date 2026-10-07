@@ -43,7 +43,7 @@ async function probeServer() {
     const res = await fetch(apiUrl('/api/judge/java?action=ping'));
     if (res.ok) {
       const data = await res.json();
-      if (data.ok) {
+      if (data.ok || data.available) {
         serverRunner = true;
         serverVersion = data.version || 'Java 21';
         return true;
@@ -107,6 +107,7 @@ self.onmessage = async ({ data: msg }) => {
             body: JSON.stringify({
               action: 'run',
               artifactId: artifact.artifactId,
+              source: artifact.source,
               input: msg.input || '',
               timeLimitMs: msg.timeLimitMs || 2000,
               outputLimit: msg.outputLimit || (1 << 20)

@@ -7,6 +7,7 @@ sandbox directory, executes test cases with strict CPU/memory limits, and return
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -25,7 +26,14 @@ _builds_lock = threading.Lock()
 _builds_cache = {}
 
 
+def normalize_java_source(source: str) -> str:
+    if not source:
+        return ""
+    return re.sub(r'\bpublic\s+(class|interface|enum|record)\b', r'\1', source)
+
+
 def compile_java(source: str):
+    source = normalize_java_source(source)
     source_hash = hashlib.sha256(source.encode()).hexdigest()
     with _builds_lock:
         cached = _builds_cache.get(source_hash)
@@ -205,6 +213,31 @@ class JudgeHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length).decode("utf-8"))
         except Exception as e:
             return self.send_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": f"Invalid JSON payload: {e}"})
+
+        action = payload.get("action")
+        if action == "compile":
+            source = payload.get("source", "")
+            res = compile_java(source)
+            if not res.get("ok"):
+                return self.send_json(HTTPStatus.OK, {"ok": False, "log": res.get("error", "Compilation failed")})
+            return self.send_json(HTTPStatus.OK, {"ok": True, "artifactId": res.get("buildId"), "log": ""})
+
+        if action == "run":
+            source = payload.get("source", "")
+            inp = payload.get("input", "")
+            limit = int(payload.get("timeLimitMs") or 2000)
+            res = compile_java(source)
+            if not res.get("ok"):
+                return self.send_json(HTTPStatus.OK, {"status": "CE", "stdout": "", "stderr": res.get("error", "Compilation failed"), "timeMs": 0})
+            run_res = run_java_test(res, inp, limit)
+            if run_res.get("ok"):
+                return self.send_json(HTTPStatus.OK, {"status": "OK", "stdout": run_res.get("stdout", ""), "stderr": "", "timeMs": round(run_res.get("timeMs", 0))})
+            else:
+                verdict = run_res.get("verdict", "RE")
+                return self.send_json(HTTPStatus.OK, {"status": verdict, "stdout": "", "stderr": run_res.get("error", ""), "timeMs": round(run_res.get("timeMs", 0))})
+
+        if action == "clean":
+            return self.send_json(HTTPStatus.OK, {"ok": True})
 
         result = execute_judge(payload)
         self.send_json(HTTPStatus.OK, result)
