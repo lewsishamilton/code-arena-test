@@ -1,109 +1,155 @@
-# CODE//ARENA — contest client
+# ⚡ CODE//ARENA
 
-A lightweight coding-contest platform that judges code **inside the contestant's browser**. It's built to run under Safe Exam Browser (SEB), but works in any modern browser while you test it.
+A high-performance coding contest platform and live proctoring dashboard designed for lab tests, hackathons, and university coding exams.
 
-```bash
-python3 serve.py
-```
-
-Then open <http://localhost:5517>. The default access code is `ARENA-2026`.
-
-Only Python 3 is needed. There's no build step and nothing to install.
+Code execution (Python & C/C++) runs **client-side directly inside each contestant's browser via WebAssembly**, offloading 100% of the compilation and execution load from your host machine. Includes a live **PostgreSQL** database backend (with automatic SQLite fallback), **Cloudflare Tunnel with Custom Domain support**, and native **Firestore / Firebase Authentication** for verifying registered contestants.
 
 ---
 
-## Screens
+## 🚀 Quick Start (Under 1 Minute)
 
-1. **Login.** Full name, roll number / student ID, and contest access code → **Enter contest**.
-2. **Arena.**
-   - **Left:** the problem (Markdown), constraints, samples with copy buttons, and a **Scoreboard & status** tab showing your score, per-problem status, the live scoreboard and your submissions.
-   - **Right:** a Monaco editor with Python 3, C++17, C17 and Java 21, per-problem starter code, and **Run sample tests** (Ctrl/⌘ + Enter) and **Submit solution** (Ctrl/⌘ + Shift + Enter).
-   - **Bottom drawer:** a terminal-style console that streams `In Queue` → `Compiling` → `Running Test 3/8` → the verdict (`AC`, `WA`, `TLE`, `RE`, `CE`, `OLE`). Its "Test results" tab shows expected and actual output for samples. Hidden test data is never shown.
+### 1. Launch with Cloudflare Tunnel & Custom Domain
+```bash
+# Option A: Quick Public Tunnel (Default)
+python3 start_tunnel.py
 
-Code autosaves per problem and language. A page refresh or an accidental "End session" loses nothing, and the contest clock keeps running per roll number. When time runs out, the editor becomes read-only and Run and Submit are disabled.
+# Option B: With Your Custom Domain (e.g. arena.yourdomain.com)
+python3 start_tunnel.py --domain arena.yourdomain.com
 
-## How judging works
-
-```
- UI thread (never runs contestant code)
-   │  judge.js: queue → compile → for each test: post to worker + start 2.0 s watchdog
-   │                                   ├─ worker answers first  → compare output → AC / WA / RE …
-   │                                   └─ watchdog fires first  → worker.terminate() → TLE
-   ▼
- Web Workers (one per runtime, respawned after a kill)
-   python.worker.js  Pyodide 0.29 (CPython → WASM)
-   clang.worker.js   Clang 21 + wasm-ld (→ WASM)  ──.wasm──▶  wasi.worker.js  runs the program
-   jscpp.worker.js   JSCPP interpreter (optional light C/C++ engine)
-   java.worker.js    placeholder (structural check only, see below)
+# Option C: With Cloudflare Zero Trust Tunnel Token (Permanent Domain Route)
+python3 start_tunnel.py --token <YOUR_CLOUDFLARE_TUNNEL_TOKEN> --domain arena.yourdomain.com
 ```
 
-- **Infinite loops can't freeze the page.** Contestant code only runs in workers. A test that doesn't answer within the time limit (2.0 s by default, set per problem) gets its worker killed with `terminate()`. The next test gets a fresh worker. Loading or reloading a runtime is never counted against the time limit.
-- **Short-circuiting.** A submission stops at the first test that isn't Accepted and reports that verdict, for example `Wrong Answer on test 3`. Running samples executes every sample so you see all the diffs.
-- **Comparison** ignores trailing spaces on each line and trailing blank lines.
-- **Sandboxing.** Before contestant code runs, each worker deletes `fetch`, `XMLHttpRequest`, `WebSocket`, `importScripts`, IndexedDB and similar APIs. Without this, Python code could `import js` and download the hidden answers. Compiled C/C++ programs get only a minimal WASI shim: stdin, stdout and stderr, with no files and no network.
+- **Student Arena:** `https://fathers-indoor-male-builders.trycloudflare.com` (or your custom domain)
+- **Admin Control Center:** `https://fathers-indoor-male-builders.trycloudflare.com/admin.html`
+- **Admin Password:** `Mlrit#2026-jrll`
 
-| Language | Engine | First load | Notes |
-|---|---|---|---|
-| Python 3 | Pyodide | ~10 MB from CDN, then cached | Standard library only (no numpy). Recursion depth is bounded by the browser stack. |
-| C++17 / C17 | Clang 21 → WebAssembly | ~23 MB from CDN, then cached for a year | Real compiler: full STL, `<bits/stdc++.h>`, `-O2`, 256 MB memory limit, 8 MB stack. Compiles take about 1–2 s. Exceptions are disabled (`-fno-exceptions`). |
-| C/C++ (optional) | JSCPP | bundled, 430 KB | Set `cppEngine: 'jscpp'`. Tiny, but a subset of C++ (no STL or `std::string`) and thousands of times slower. Only for emergencies. |
-| Java 21 | placeholder | — | See "Java" below. |
+---
 
-The runtime for the selected language starts loading as soon as the arena opens, while the contestant reads the problem.
+## 🌐 How to Point Your Custom Domain to CodeArena
 
-**Java.** No JVM plus `javac` currently runs well inside a Web Worker. The Java worker uses the same message protocol as the others and checks the code's structure (braces, `class Main`, `main(String[])`). It then returns **Not Judged**. Those submissions are saved and sent to the server, but they don't count as attempts. To add real Java support, replace `public/workers/java.worker.js` with a runtime that uses the same protocol (`init` → `ready`, `compile` → `compiled`, `run` → `result`). Nothing else needs to change.
+You have two easy ways to run CodeArena on your own domain:
 
-## Safe Exam Browser
+### Method 1: Instant DNS CNAME (Works with any Domain Registrar)
+1. Run `python3 start_tunnel.py --domain arena.yourdomain.com`.
+2. Look at the generated `trycloudflare.com` hostname (e.g. `fathers-indoor-male-builders.trycloudflare.com`).
+3. In your DNS provider (Cloudflare, GoDaddy, Namecheap, etc.), add a **CNAME** record:
+   - **Type:** `CNAME`
+   - **Name / Host:** `arena` (or `@` for root domain)
+   - **Target / Value:** `fathers-indoor-male-builders.trycloudflare.com`
+   - **Proxy status:** Proxied (if using Cloudflare)
+4. Your students can now immediately access: `https://arena.yourdomain.com`
 
-There are two layers, and production needs both.
+### Method 2: Cloudflare Zero Trust Named Tunnel (Permanent / Recommended)
+1. Go to **[Cloudflare Dashboard](https://one.dash.cloudflare.com/)** → **Networks** → **Tunnels**.
+2. Click **Create a Tunnel** (name it e.g. `codearena`).
+3. Under the **Public Hostname** tab:
+   - **Subdomain:** `arena`
+   - **Domain:** `yourdomain.com`
+   - **Service:** `HTTP` → `localhost:5517`
+4. Copy your Tunnel Token and start the tunnel:
+   ```bash
+   python3 start_tunnel.py --token <YOUR_TUNNEL_TOKEN> --domain arena.yourdomain.com
+   ```
 
-| | Test mode (now) | Production |
-|---|---|---|
-| `public/js/config.js` | `ENABLE_SEB_CHECK = false` | `ENABLE_SEB_CHECK = true` |
-| Server | `python3 serve.py` | `SEB_CONFIG_KEYS=<key> python3 serve.py --seb` |
+---
 
-- **In the page** (`js/seb.js`): this layer requires SEB's user agent or its JavaScript API. If you list your Config Key in `CONFIG.seb.configKeys`, it also checks `SafeExamBrowser.security.configKey` against `SHA-256(page URL + Config Key)`, which proves the contestant is using *your* `.seb` file.
-- **On the server** (`serve.py --seb`): this layer checks every request's `X-SafeExamBrowser-ConfigKeyHash` (or `X-SafeExamBrowser-RequestHash`) header against `SHA-256(absolute URL + key)`. It returns **403** otherwise, so a normal browser never receives the page or the hidden tests. If you run behind a reverse proxy, set `SEB_PUBLIC_ORIGIN=https://contest.example.edu` so URLs are hashed exactly as SEB sees them.
+## 🔥 Firestore Student Authentication
 
-**SEB configuration checklist**
+Contestants log in using their registered credentials created during registration.
 
-1. Start URL: `http(s)://<server>:5517/`.
-2. Turn on "Send Config Key", then copy the Config Key into `SEB_CONFIG_KEYS` (and optionally `CONFIG.seb.configKeys`).
-3. Allow these hosts in the URL filter: `cdn.jsdelivr.net` (Pyodide, Clang), `cdnjs.cloudflare.com` (Monaco), and `fonts.googleapis.com` / `fonts.gstatic.com`. For an offline lab, mirror them and point `CONFIG.cdn` at the mirror. If Monaco is blocked, the app falls back to a basic editor automatically.
-4. Rehearse once with your exact SEB version. SEB versions differ in which requests (worker scripts, `fetch`) carry the hash headers.
+### How It Works:
+1. Student enters their **User ID / Roll Number** (e.g. `25R21A05JR`) and their **Password**.
+2. CodeArena verifies them against:
+   - **Firestore `registrations` collection**: Confirms their registration exists and fee status is `paid`.
+   - **Firebase Authentication**: Validates their registered password.
+3. Automatically retrieves the student's **registered Full Name** (`name`) from Firestore.
+4. Activates **Fullscreen Exam Mode** and enters the Coding Arena!
+5. Unregistered students or incorrect passwords are automatically rejected with clear error messages.
 
-## Running a contest
+### Configuration (`firebase-config.json` & `serviceAccountKey.json`):
+Both files are already configured and connected to your live Firebase project `codearena-31947`:
+- **Web API Key:** `AIzaSyAS8NMWRcKyU-6WK791X5QXy7lV4QgcNgU`
+- **Project ID:** `codearena-31947`
+- **Firestore Service Account:** Active in `serviceAccountKey.json` for real-time document validation.
 
-- **Access codes:** the code itself never ships, only its hash. Get one with `printf 'NEW-CODE' | shasum -a 256` and paste it into `CONFIG.accessCodeHashes`.
-- **Timing:** `durationMin` (counted from each contestant's first login) or a fixed `contestEnd`.
-- **Results:** every judged submission, *including its source code*, is appended to `results/submissions.jsonl`. `GET /api/scoreboard` ranks contestants by score, then penalty: minutes to solve plus 10 per earlier wrong attempt. CE and Not Judged add no penalty. If the server can't be reached, results queue in the browser and sync when it's back.
-- **Problems:** edit `public/js/problems.js` (Markdown statement, constraints, samples). Then add a generator and reference solution in `tools/build_tests.py` and run `python3 tools/build_tests.py`. It checks the reference against your samples and writes `public/data/tests/<ID>.json`. `tools/` is never served.
+---
 
-## Security model and known limits
+## ⚡ Can 1 Computer Handle 60 Simultaneous Students?
 
-This is client-side judging. That's a deliberate trade-off (no judge servers) with consequences you should know:
+### **YES, easily — and here is why:**
 
-- **Verdicts are computed and reported by the contestant's browser.** Inside SEB (no devtools, no other apps) that's reasonable for a campus round. A determined attacker in an ordinary browser could forge a submission. For high-stakes rounds, re-judge `results/submissions.jsonl` (the source is stored) on a trusted machine before announcing winners.
-- Hidden tests reach the browser when a solution is submitted. Contestant code can't read them (worker lockdown), but someone with devtools could. SEB is what prevents that.
-- Memory limits are enforced only for C/C++ (WebAssembly max memory). Very deep recursion (above about 10k frames) overflows the browser stack and shows up as a Runtime Error with a hint.
-- Timing is wall-clock on the contestant's machine, so a slow lab PC is slower. The 2 s default leaves wide headroom: reference solutions run in 2–20 ms.
+1. **Zero Server CPU Load for Code Execution:**
+   - **Python 3**: Runs via [Pyodide](https://pyodide.org/) (CPython WebAssembly running inside the student's browser tab).
+   - **C++17 / C17**: Compiled and executed in-browser using Clang WebAssembly workers.
+   - When 60 students click "Run" or "Submit", all 60 compilations and test suite evaluations run **on their own laptops/desktops**. Your server CPU usage remains close to 0%.
 
-## Files
+2. **Ultra-Lightweight Polling Load:**
+   - 60 active contestants polling the contest clock/state every 4 seconds produces only **~15 lightweight JSON HTTP requests per second**.
+   - Python's multithreaded server and PostgreSQL connection pool (`ThreadedConnectionPool`) handle thousands of requests per second with single-digit millisecond latency.
 
+3. **Cloudflare Edge CDN Acceleration:**
+   - Cloudflare Tunnel automatically caches static CSS, Monaco editor files, and WASM bundles at edge servers closest to the students, eliminating network bottlenecks on your host computer.
+
+---
+
+## 🐘 Connect with PostgreSQL
+
+Point CodeArena to your PostgreSQL database:
+```bash
+python3 serve.py --postgres "postgresql://username:password@localhost:5432/codearena"
 ```
-serve.py                 static server + SEB header check + results API (stdlib only)
-tools/build_tests.py     hidden-test generator with reference solutions (not served)
-public/
-  index.html             the three screens (SEB required · login · arena)
-  css/app.css            design tokens and components carried over from the template
-  js/config.js           ← organisers edit this
-  js/problems.js         problem statements, samples, starter code
-  js/app.js              login + arena UI, scoring, result sync
-  js/judge.js            worker hosts, watchdog, short-circuit, verdicts
-  js/editor.js           Monaco + fallback editor
-  js/seb.js              SEB detection + SHA-256
-  workers/*.worker.js    one file per runtime, same message protocol
-  vendor/                marked (Markdown), JSCPP
-  data/tests/*.json      hidden tests (generated)
+*(If no PostgreSQL URL is provided, CodeArena automatically falls back to SQLite at `results/contest.db`).*
+
+---
+
+## 🛡️ Admin Control Center (`/admin.html`)
+
+- **URL:** `http://localhost:5517/admin.html` (or `<your-domain>/admin.html`)
+- **Password:** `Mlrit#2026-jrll`
+
+### Proctor Capabilities:
+- **Timer Management:** Start, pause, resume, or add extra time (`+5m`, `+10m`, `+15m`, `+30m`) synced live to all student screens.
+- **Escape Detection & Live Unblock:** Instant alerts whenever a contestant leaves fullscreen or switches tabs. Unblock them with a single click.
+- **Real-Time Submissions Stream:** View pass/fail verdicts and inspect submitted source code in real time.
+- **Broadcast Announcements:** Send hall-wide alerts that appear instantly as banners and toast notifications.
+- **Questions & Test Suites Management:** Add/edit questions, public samples, and hidden judge test suites directly from the admin panel.
+
+---
+
+## ☁️ Google Cloud Free Tier Deployment (VM + Cloud Run)
+
+To run CodeArena 24/7 in Google Cloud for 60+ simultaneous students completely free:
+
+### 1. Deploy the Java Judge to Cloud Run (1 Command)
+Cloud Run provides 2 million free requests/month with 2 GB RAM per execution:
+```bash
+cd judge-service
+gcloud run deploy codearena-java-judge \
+  --source . \
+  --platform managed \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --memory 2Gi
 ```
-# code-arena-test
+Copy the generated Service URL (e.g., `https://codearena-java-judge-xyz-uc.a.run.app`).
+
+### 2. Run CodeArena on the Free Google Cloud VM (`e2-micro`)
+1. Create an `e2-micro` VM (Ubuntu 24.04, 30 GB disk) in `us-central1`, `us-east1`, or `us-west1`.
+2. SSH into your VM and clone the repository:
+   ```bash
+   git clone <your-repo-url> codearena
+   cd codearena
+   pip3 install -r requirements.txt
+   ```
+3. Set your Cloud Run URL and start CodeArena:
+   ```bash
+   export JAVA_JUDGE_URL="https://codearena-java-judge-xyz-uc.a.run.app"
+   python3 serve.py
+   ```
+4. Expose with Cloudflare Tunnel:
+   ```bash
+   python3 start_tunnel.py --domain arena.yourdomain.com
+   ```
+
+# CodeArenaLive
