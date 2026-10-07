@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# CodeArena Java builds & runtime
+.java_builds/
+*.class
+
+# Environment & credentials (keep templates only)
+.env
+.env.local
+serviceAccountKey.json
+*serviceAccountKey*.json
+*.pem
+*.key
+
+# Database & contest results (stored locally / runtime only)
+results/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+submissions.jsonl
+*.jsonl
+
+# Node & package caches
+node_modules/
+dist/
+.vite/
+
+# OS & Editor
+.DS_Store
+**/.DS_Store
+Thumbs.db
+.claude/
+.vscode/
+.idea/
+
+# Tunnel and log artifacts
+*.log
+tunnel_url.json
+**/tunnel_url.json
+
+

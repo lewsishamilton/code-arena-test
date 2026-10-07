@@ -1,0 +1,1768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CODE//ARENA — Admin Control Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/app.css">
+  <style>
+    body {
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      margin: 0;
+    }
+    /* Auth Modal Screen */
+    #auth-screen {
+      position: fixed;
+      inset: 0;
+      background: rgba(17, 20, 17, 0.95);
+      backdrop-filter: blur(12px);
+      z-index: 1000;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+    }
+    .auth-card {
+      background: var(--card);
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      padding: 36px 32px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+      text-align: center;
+    }
+    .auth-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .admin-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 28px;
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .admin-bar .brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: 18px;
+    }
+    .admin-bar .brand-tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(229, 96, 79, 0.15);
+      color: var(--danger-text);
+      border: 1px solid rgba(229, 96, 79, 0.4);
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+    .clock-pill {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 14px;
+      font-family: var(--mono);
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .status-badge {
+      font-size: 11px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      text-transform: uppercase;
+      font-weight: 700;
+      font-family: var(--font);
+    }
+    .status-running { background: rgba(111, 214, 79, 0.15); color: var(--ok); border: 1px solid rgba(111, 214, 79, 0.4); }
+    .status-paused { background: rgba(214, 167, 52, 0.15); color: var(--warn); border: 1px solid rgba(214, 167, 52, 0.4); }
+    .status-waiting { background: rgba(121, 168, 212, 0.15); color: var(--info); border: 1px solid rgba(121, 168, 212, 0.4); }
+    .status-ended { background: rgba(229, 96, 79, 0.15); color: var(--danger-text); border: 1px solid rgba(229, 96, 79, 0.4); }
+
+    .admin-content {
+      flex: 1;
+      padding: 24px 28px;
+      max-width: 1480px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    /* Control Deck Box */
+    .control-deck {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .deck-section {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .deck-title {
+      font-size: 13px;
+      text-transform: uppercase;
+      color: var(--text-2);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      min-width: 140px;
+    }
+    .btn-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+    }
+    .kpi-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 14px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .kpi-num {
+      font-size: 26px;
+      font-weight: 700;
+      font-family: var(--mono);
+      color: var(--text);
+    }
+    .kpi-label {
+      font-size: 12px;
+      color: var(--text-2);
+      text-transform: uppercase;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .filter-input {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      color: var(--text);
+      padding: 8px 14px;
+      font-size: 14px;
+      min-width: 260px;
+    }
+    .filter-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .btn-danger-sm {
+      background: rgba(229, 96, 79, 0.15);
+      color: var(--danger-text);
+      border: 1px solid rgba(229, 96, 79, 0.35);
+      border-radius: var(--r-sm);
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      transition: all 0.15s ease;
+    }
+    .btn-danger-sm:hover {
+      background: var(--danger);
+      color: #fff;
+    }
+    .btn-restore-sm {
+      background: rgba(111, 214, 79, 0.15);
+      color: var(--ok);
+      border: 1px solid rgba(111, 214, 79, 0.35);
+      border-radius: var(--r-sm);
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      transition: all 0.15s ease;
+    }
+    .btn-restore-sm:hover {
+      background: var(--ok);
+      color: #0c130b;
+    }
+    .btn-inspect-sm {
+      background: rgba(121, 168, 212, 0.15);
+      color: var(--info);
+      border: 1px solid rgba(121, 168, 212, 0.35);
+      border-radius: var(--r-sm);
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      transition: all 0.15s ease;
+    }
+    .btn-inspect-sm:hover {
+      background: var(--info);
+      color: #0c130b;
+    }
+    .badge-solved {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(111, 214, 79, 0.15);
+      color: var(--ok);
+      border: 1px solid rgba(111, 214, 79, 0.4);
+    }
+    .badge-unsolved {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 11px;
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.04);
+    }
+    /* Modal Viewer */
+    .modal-box {
+      background: var(--card);
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      padding: 24px;
+      max-width: 800px;
+      width: 90%;
+      max-height: 85vh;
+      overflow-y: auto;
+    }
+    pre.code-view {
+      background: #0d100d;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      font-family: var(--mono);
+      font-size: 13px;
+      color: #d8f5d0;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+    body.projector .table th, body.projector .table td {
+      padding: 14px 16px;
+      font-size: 17px;
+    }
+    body.projector .control-deck {
+      display: none;
+    }
+    body.projector .kpi-num {
+      font-size: 34px;
+    }
+
+    /* Questions Management UI */
+    .badge-easy {
+      background: rgba(111, 214, 79, 0.15);
+      color: var(--ok);
+      border: 1px solid rgba(111, 214, 79, 0.4);
+    }
+    .badge-medium {
+      background: rgba(214, 167, 52, 0.15);
+      color: var(--warn);
+      border: 1px solid rgba(214, 167, 52, 0.4);
+    }
+    .badge-hard {
+      background: rgba(229, 96, 79, 0.15);
+      color: var(--danger-text);
+      border: 1px solid rgba(229, 96, 79, 0.4);
+    }
+    .badge-qid {
+      font-family: var(--mono);
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .q-banner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 20px;
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    /* Question Modal */
+    #question-modal {
+      width: min(960px, calc(100vw - 32px));
+      max-width: 960px;
+      border: 1px solid var(--border-strong);
+      border-radius: 12px;
+      background: var(--bg);
+      color: var(--text);
+      padding: 0;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.85);
+      max-height: 92vh;
+    }
+    #question-modal::backdrop {
+      background: rgba(5, 8, 5, 0.8);
+      backdrop-filter: blur(5px);
+    }
+    .qmodal-content {
+      display: flex;
+      flex-direction: column;
+      max-height: 92vh;
+    }
+    .qmodal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 18px 24px;
+      background: var(--bg-2);
+      border-bottom: 1px solid var(--border);
+    }
+    .qmodal-body {
+      padding: 24px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .qmodal-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 16px 24px;
+      background: var(--bg-2);
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .form-grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .form-label {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-2);
+    }
+    .form-input, .form-select, .form-textarea {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      color: var(--text);
+      padding: 9px 12px;
+      font-family: var(--font);
+      font-size: 14px;
+      transition: border-color 0.15s;
+    }
+    .form-input:focus, .form-select:focus, .form-textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .form-textarea {
+      resize: vertical;
+      line-height: 1.5;
+    }
+    .sample-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .sample-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .sample-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    @media (max-width: 640px) {
+      .sample-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Login Gate -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <div style="font-size:32px; margin-bottom:12px;">🛡️</div>
+    <h1 class="auth-title">CODE//ARENA Admin</h1>
+    <p class="text-2" style="margin-bottom:20px; font-size:14px;">Enter the administrator password to unlock</p>
+    
+    <form id="auth-form" style="display:flex; flex-direction:column; gap:14px;">
+      <input type="password" id="auth-pwd" class="input mono" placeholder="Admin Password" required autofocus autocomplete="current-password">
+      <div id="auth-err" style="color:var(--danger); font-size:13px; display:none;">Invalid admin password.</div>
+      <button type="submit" class="btn btn-primary btn-block" id="auth-submit">Unlock Console</button>
+    </form>
+  </div>
+</div>
+
+<header class="admin-bar">
+  <div class="brand">
+    <span class="brand-mark" style="color:var(--accent);">//</span>
+    <span>CODE//ARENA</span>
+    <span class="brand-tag">Superadmin Console</span>
+  </div>
+
+  <div class="clock-pill">
+    <span style="font-size:12px; color:var(--text-2);">CONTEST CLOCK</span>
+    <span id="timer-display" style="color:var(--text);">--:--:--</span>
+    <span id="status-pill" class="status-badge status-running">RUNNING</span>
+  </div>
+
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="btn btn-secondary btn-sm" id="btn-projector">🖥 Projector Mode</button>
+    <button class="btn btn-ghost btn-sm" id="btn-logout" title="Log out of admin">Logout</button>
+  </div>
+</header>
+
+<main class="admin-content">
+  <!-- Absolute Control Deck -->
+  <section class="control-deck">
+    <!-- Timer Action Bar -->
+    <div class="deck-section">
+      <div class="deck-title">⏱️ Timer Controls</div>
+      <div class="btn-group">
+        <button class="btn btn-primary btn-sm" id="btn-timer-start">▶ Start / Resume</button>
+        <button class="btn btn-secondary btn-sm" id="btn-timer-pause">⏸ Pause</button>
+        <span style="border-left:1px solid var(--border); height:24px; margin:0 4px;"></span>
+        <button class="btn btn-ghost btn-sm" data-add="5">+5 Min</button>
+        <button class="btn btn-ghost btn-sm" data-add="10">+10 Min</button>
+        <button class="btn btn-ghost btn-sm" data-add="15">+15 Min</button>
+        <button class="btn btn-ghost btn-sm" data-add="30">+30 Min</button>
+        <span style="border-left:1px solid var(--border); height:24px; margin:0 4px;"></span>
+        <button class="btn btn-ghost btn-sm" id="btn-timer-reset" style="color:var(--warn);">↺ Reset Timer (120m)</button>
+      </div>
+    </div>
+
+    <!-- Announcement Bar -->
+    <div class="deck-section">
+      <div class="deck-title">📢 Hall Broadcast</div>
+      <div style="display:flex; align-items:center; gap:10px; flex:1; max-width:700px;">
+        <input type="text" id="announcement-input" class="filter-input" style="flex:1;" placeholder="Type announcement to display on all student screens…">
+        <button class="btn btn-secondary btn-sm" id="btn-send-announcement">Broadcast</button>
+        <button class="btn btn-ghost btn-sm" id="btn-clear-announcement">Clear</button>
+      </div>
+      <div>
+        <button class="btn btn-danger-sm" id="btn-wipe-contest" style="padding:6px 14px;">⚠️ Reset All Contest Submissions</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- KPI Overview Cards -->
+  <section class="kpi-grid">
+    <div class="kpi-card">
+      <span class="kpi-label">Active Contestants</span>
+      <span class="kpi-num" id="stat-contestants">0</span>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Total Submissions</span>
+      <span class="kpi-num" id="stat-subs">0</span>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Accepted (AC)</span>
+      <span class="kpi-num" id="stat-ac" style="color:var(--ok);">0</span>
+    </div>
+    <div class="kpi-card">
+      <span class="kpi-label">Disqualified / Kicked</span>
+      <span class="kpi-num" id="stat-kicked" style="color:var(--danger);">0</span>
+    </div>
+    <div class="kpi-card" id="kpi-card-violations" style="cursor:pointer;" title="Click to view lockdown escapes">
+      <span class="kpi-label">🚨 Security Escapes</span>
+      <span class="kpi-num" id="stat-violations" style="color:var(--danger-text);">0</span>
+    </div>
+  </section>
+
+  <!-- Toolbar with Tabs & Filter -->
+  <div class="toolbar">
+    <div class="tabs" id="view-tabs">
+      <button class="active" id="tab-leaderboard">Live Leaderboard</button>
+      <button id="tab-feed">Submissions Stream</button>
+      <button id="tab-questions">📝 Questions & Tests (<span id="questions-count">0</span>)</button>
+      <button id="tab-kicked">Kicked Students (<span id="kicked-count">0</span>)</button>
+      <button id="tab-violations" style="color:var(--danger-text);">🚨 Security Escapes (<span id="violations-count">0</span>)</button>
+    </div>
+
+    <input type="search" class="filter-input" id="search-box" placeholder="Search by name, roll, or problem…">
+  </div>
+
+  <!-- Leaderboard Table -->
+  <section id="panel-leaderboard" class="panel table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width:60px;">Rank</th>
+          <th>Contestant</th>
+          <th class="mono" style="width:140px;">Roll Number</th>
+          <th id="th-problems-header" style="text-align:center;">Problems</th>
+          <th class="right" style="width:110px;">Score</th>
+          <th class="right" style="width:110px;">Action</th>
+        </tr>
+      </thead>
+      <tbody id="leaderboard-tbody">
+        <tr><td colspan="6" style="text-align:center; padding:32px;" class="muted">Loading leaderboard…</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Submissions Feed Table -->
+  <section id="panel-feed" class="panel table-wrap" hidden>
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width:60px;">#</th>
+          <th style="width:110px;">Time</th>
+          <th>Contestant</th>
+          <th class="mono" style="width:130px;">Roll</th>
+          <th style="width:80px;">Problem</th>
+          <th style="width:90px;">Language</th>
+          <th style="width:100px;">Verdict</th>
+          <th class="right" style="width:80px;">Tests</th>
+          <th class="right" style="width:90px;">Runtime</th>
+          <th class="right" style="width:100px;">Code</th>
+        </tr>
+      </thead>
+      <tbody id="feed-tbody">
+        <tr><td colspan="10" style="text-align:center; padding:32px;" class="muted">Loading submissions…</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Questions & Test Suites Panel -->
+  <section id="panel-questions" class="panel table-wrap" hidden>
+    <div class="q-banner">
+      <div>
+        <div style="font-weight:700; font-size:15px; display:flex; align-items:center; gap:8px;">
+          <span>📝 Contest Questions & Judge Test Suites</span>
+          <span class="badge" id="banner-questions-count">0 problems</span>
+        </div>
+        <div class="text-2 small" style="margin-top:2px;">
+          Define statements, sample cases, and hidden judge test suites. All updates sync immediately to student workbenches.
+        </div>
+      </div>
+      <div>
+        <button class="btn btn-primary btn-sm" id="btn-add-question">＋ Create New Question</button>
+      </div>
+    </div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th style="width:70px;">ID</th>
+          <th>Title</th>
+          <th style="width:110px;">Difficulty</th>
+          <th class="right" style="width:100px;">Points</th>
+          <th class="right" style="width:110px;">Time Limit</th>
+          <th class="right" style="width:100px;">Samples</th>
+          <th class="right" style="width:130px;">Hidden Tests</th>
+          <th class="right" style="width:230px;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="questions-tbody">
+        <tr><td colspan="8" style="text-align:center; padding:32px;" class="muted">Loading questions…</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Kicked Students Table -->
+  <section id="panel-kicked" class="panel table-wrap" hidden>
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="mono" style="width:160px;">Roll Number</th>
+          <th>Name</th>
+          <th>Disqualification Reason</th>
+          <th style="width:140px;">Kicked At</th>
+          <th class="right" style="width:120px;">Action</th>
+        </tr>
+      </thead>
+      <tbody id="kicked-tbody">
+        <tr><td colspan="5" style="text-align:center; padding:32px;" class="muted">No students currently disqualified.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Security Violations Table -->
+  <section id="panel-violations" class="panel table-wrap" hidden>
+    <div style="padding: 12px 18px; background: rgba(229, 96, 79, 0.1); border-bottom: 1px solid rgba(229, 96, 79, 0.3); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+      <span style="font-size:13px; color:var(--danger-text); font-weight:600;">🚨 Live Security Escape Feed — Monitors window unfocus, tab switching, minimizing, app switching, and forbidden keys in real time.</span>
+      <button class="btn btn-ghost btn-sm" id="btn-sound-toggle">🔊 Alert Chime: ON</button>
+    </div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="mono" style="width:140px;">Roll Number</th>
+          <th>Name</th>
+          <th style="width:170px;">Violation Type</th>
+          <th>Incident Details</th>
+          <th style="width:120px;">Recorded At</th>
+          <th style="width:110px;">Status</th>
+          <th class="right" style="width:160px;">Action</th>
+        </tr>
+      </thead>
+      <tbody id="violations-tbody">
+        <tr><td colspan="7" style="text-align:center; padding:32px;" class="muted">No security violations recorded.</td></tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+
+<!-- Question & Test Suite Editor Modal -->
+<dialog id="question-modal">
+  <div class="qmodal-content">
+    <div class="qmodal-header">
+      <div>
+        <h3 id="qmodal-heading" style="margin:0; font-size:18px;">Question & Tests Editor</h3>
+        <p class="muted small" style="margin:2px 0 0 0;">Manage problem statement, parameters, public samples, and hidden judge test suites</p>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" id="btn-close-qmodal">✕ Close</button>
+    </div>
+
+    <form id="qmodal-form" class="qmodal-body">
+      <!-- Row 1: ID, Title, Difficulty, Points, Time Limit -->
+      <div class="form-grid-3">
+        <div class="form-group" style="max-width:140px;">
+          <label class="form-label" for="qmodal-id">Problem ID</label>
+          <input type="text" id="qmodal-id" class="form-input mono uppercase" placeholder="e.g. A, B, D" required maxlength="10">
+        </div>
+        <div class="form-group" style="grid-column: span 2;">
+          <label class="form-label" for="qmodal-title">Problem Title</label>
+          <input type="text" id="qmodal-title" class="form-input" placeholder="e.g. Balanced Signal" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="qmodal-diff">Difficulty</label>
+          <select id="qmodal-diff" class="form-select">
+            <option value="Easy">Easy</option>
+            <option value="Medium" selected>Medium</option>
+            <option value="Hard">Hard</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="qmodal-points">Score Points</label>
+          <input type="number" id="qmodal-points" class="form-input mono" min="10" max="1000" step="10" value="100" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="qmodal-timelimit">Time Limit (ms)</label>
+          <input type="number" id="qmodal-timelimit" class="form-input mono" min="500" max="15000" step="500" value="2000" required>
+        </div>
+      </div>
+
+      <!-- Row 2: Problem Statement (Markdown) -->
+      <div class="form-group">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <label class="form-label" for="qmodal-statement">Problem Statement (Markdown)</label>
+          <span class="muted small">Headers (###), code blocks (```), bullet points, and math supported</span>
+        </div>
+        <textarea id="qmodal-statement" class="form-textarea" rows="8" placeholder="Describe the problem, input format, and output format..." required></textarea>
+      </div>
+
+      <!-- Row 3: Constraints -->
+      <div class="form-group">
+        <label class="form-label" for="qmodal-constraints">Constraints (One per line)</label>
+        <textarea id="qmodal-constraints" class="form-textarea mono" rows="3" placeholder="2 ≤ n ≤ 2 × 10⁵&#10;1 ≤ a[i] ≤ 10⁹"></textarea>
+      </div>
+
+      <!-- Row 4: Public Sample Cases -->
+      <div class="form-group">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <label class="form-label">Public Sample Test Cases</label>
+            <p class="muted small" style="margin:0;">These are displayed on the question description and tested when contestants click "Run Sample Tests".</p>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="btn-add-sample">＋ Add Sample</button>
+        </div>
+        <div id="samples-container" style="display:flex; flex-direction:column; gap:12px; margin-top:8px;">
+          <!-- Dynamically populated sample cards -->
+        </div>
+      </div>
+
+      <!-- Row 5: Hidden Judge Test Suite -->
+      <div class="form-group" style="background:var(--card); border:1px solid var(--border); border-radius:var(--r); padding:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:10px;">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <label class="form-label" style="margin:0;">Hidden Judge Test Cases</label>
+              <span id="tests-count-badge" class="badge badge-ok">0 Tests</span>
+            </div>
+            <p class="muted small" style="margin:2px 0 0 0;">Evaluated in background when a solution is submitted. Saved to <code>public/data/tests/&lt;ID&gt;.json</code>.</p>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <input type="file" id="tests-file-input" accept=".json" style="display:none;">
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-upload-file">📁 Upload .json</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-copy-samples-to-tests">📋 Copy Samples Here</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="btn-format-tests">⚡ Format JSON</button>
+          </div>
+        </div>
+
+        <div style="position:relative;">
+          <textarea id="qmodal-tests-raw" class="form-textarea mono" rows="8" style="font-size:12px; white-space:pre;" placeholder='[&#10;  {&#10;    "input": "10\nRLRRLLRLRL\n",&#10;    "output": "4\n"&#10;  }&#10;]'></textarea>
+        </div>
+        <div id="tests-syntax-status" style="font-size:12px; margin-top:6px; font-family:var(--mono);"></div>
+      </div>
+    </form>
+
+    <div class="qmodal-footer">
+      <div>
+        <button type="button" class="btn btn-danger-sm" id="btn-modal-delete-q" style="display:none;">🗑️ Delete Problem</button>
+      </div>
+      <div style="display:flex; gap:10px;">
+        <button type="button" class="btn btn-secondary btn-sm" id="btn-cancel-qmodal">Cancel</button>
+        <button type="button" class="btn btn-primary btn-sm" id="btn-save-question">💾 Save Question & Tests</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<!-- Code Inspector Modal -->
+<dialog id="code-modal" class="modal">
+  <div class="modal-box">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+      <div>
+        <h3 id="modal-code-title" style="margin:0;">Source Code</h3>
+        <p id="modal-code-meta" class="muted small" style="margin-top:2px;"></p>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="btn-close-code">✕ Close</button>
+    </div>
+    <pre id="code-display" class="code-view">Loading...</pre>
+  </div>
+</dialog>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script type="module">
+  import { PROBLEMS } from './js/problems.js';
+
+  let token = sessionStorage.getItem('admin_token') || '';
+  let contestState = null;
+  let scoreboardData = [];
+  let submissionsData = [];
+  let kickedData = [];
+  let violationsData = [];
+  let questionsData = [];
+  let problemsList = [...PROBLEMS];
+  let editingQuestionId = null;
+  let editingSamples = [];
+  let soundAlertEnabled = true;
+  let lastSeenViolationId = 0;
+  let searchTerm = '';
+
+  // Synthesized Web Audio chime for real-time escape notifications
+  function playAlertChime() {
+    if (!soundAlertEnabled) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(440, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.4);
+    } catch {}
+  }
+
+  // DOM Elements
+  const authScreen = document.getElementById('auth-screen');
+  const authForm = document.getElementById('auth-form');
+  const authPwd = document.getElementById('auth-pwd');
+  const authErr = document.getElementById('auth-err');
+  const timerDisplay = document.getElementById('timer-display');
+  const statusPill = document.getElementById('status-pill');
+
+  // Headers for problem columns (dynamic)
+  function refreshProblemHeaders() {
+    const theadRow = document.querySelector('#panel-leaderboard thead tr');
+    if (!theadRow) return;
+    theadRow.innerHTML = `
+      <th style="width:60px;">Rank</th>
+      <th>Contestant</th>
+      <th class="mono" style="width:140px;">Roll Number</th>
+      ${problemsList.map(p => `<th class="right" style="width:80px;">${escapeHtml(p.id)} (${p.points})</th>`).join('')}
+      <th class="right" style="width:110px;">Score</th>
+      <th class="right" style="width:110px;">Action</th>
+    `;
+  }
+  refreshProblemHeaders();
+
+  function toast(msg, type = 'info') {
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    document.getElementById('toasts').appendChild(el);
+    setTimeout(() => el.remove(), 3500);
+  }
+
+  function formatClock(ms) {
+    if (ms <= 0) return '00:00:00';
+    const s = Math.floor(ms / 1000);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return [h, m, sec].map(v => String(v).padStart(2, '0')).join(':');
+  }
+
+  async function api(path, opts = {}) {
+    opts.headers = opts.headers || {};
+    opts.headers['X-Admin-Token'] = token;
+    if (opts.body && typeof opts.body === 'object') {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(opts.body);
+    }
+    const res = await fetch(path, opts);
+    if (res.status === 401) {
+      sessionStorage.removeItem('admin_token');
+      token = '';
+      showAuth();
+      throw new Error('Unauthorized');
+    }
+    return res;
+  }
+
+  function showAuth() {
+    authScreen.style.display = 'grid';
+    authPwd.value = '';
+    authPwd.focus();
+  }
+
+  function hideAuth() {
+    authScreen.style.display = 'none';
+  }
+
+  // Auth Submit
+  authForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    const password = authPwd.value.trim();
+    try {
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        token = data.token;
+        sessionStorage.setItem('admin_token', token);
+        hideAuth();
+        toast('Admin access granted', 'ok');
+        loadAll();
+      } else {
+        authErr.style.display = 'block';
+      }
+    } catch {
+      authErr.style.display = 'block';
+    }
+  });
+
+  document.getElementById('btn-logout').addEventListener('click', () => {
+    sessionStorage.removeItem('admin_token');
+    token = '';
+    showAuth();
+  });
+
+  // Verify initial token
+  if (!token) {
+    showAuth();
+  } else {
+    hideAuth();
+    loadAll();
+  }
+
+  async function loadAll() {
+    if (!token) return;
+    try {
+      const [stateRes, sbRes, subRes, qRes] = await Promise.allSettled([
+        api('/api/admin/state'),
+        fetch('/api/scoreboard', { cache: 'no-store' }),
+        api('/api/admin/submissions'),
+        api('/api/admin/questions')
+      ]);
+
+      if (stateRes.status === 'fulfilled' && stateRes.value.ok) {
+        const data = await stateRes.value.json();
+        contestState = data.contest;
+        kickedData = data.kicked || [];
+        const newViolations = data.violations || [];
+
+        // Check for freshly reported active violations to trigger sound chime & urgent toast
+        if (newViolations.length) {
+          const fresh = newViolations.filter(v => v.id > lastSeenViolationId && v.status === 'active');
+          if (fresh.length) {
+            playAlertChime();
+            fresh.forEach(v => {
+              toast(`🚨 SECURITY ALERT: ${v.roll} (${v.name || 'Contestant'}) ESCAPED EXAM WINDOW! [${v.detail}]`, 'bad');
+            });
+            lastSeenViolationId = Math.max(...newViolations.map(v => v.id), lastSeenViolationId);
+          }
+        }
+        violationsData = newViolations;
+
+        updateStateUI();
+        updateKickedUI();
+        updateViolationsUI();
+      }
+      if (sbRes.status === 'fulfilled' && sbRes.value.ok) {
+        const json = await sbRes.value.json();
+        scoreboardData = json.rows || [];
+        updateScoreboard();
+      }
+      if (subRes.status === 'fulfilled' && subRes.value.ok) {
+        const json = await subRes.value.json();
+        submissionsData = json.submissions || [];
+        updateFeed();
+      }
+      if (qRes.status === 'fulfilled' && qRes.value.ok) {
+        const qJson = await qRes.value.json();
+        questionsData = qJson.questions || [];
+        problemsList = questionsData.map(q => ({ id: q.id, title: q.title, points: q.points }));
+        refreshProblemHeaders();
+        updateQuestionsUI();
+      }
+      updateStats();
+    } catch (err) {
+      console.error('Data refresh error', err);
+    }
+  }
+
+  function updateStateUI() {
+    if (!contestState) return;
+    timerDisplay.textContent = formatClock(contestState.timeLeftMs);
+    statusPill.textContent = contestState.status.toUpperCase();
+    statusPill.className = `status-badge status-${contestState.status}`;
+
+    if (contestState.announcement) {
+      document.getElementById('announcement-input').value = contestState.announcement;
+    }
+  }
+
+  function updateStats() {
+    document.getElementById('stat-contestants').textContent = scoreboardData.length;
+    document.getElementById('stat-subs').textContent = submissionsData.length;
+    const ac = submissionsData.filter(s => s.verdict === 'AC').length;
+    document.getElementById('stat-ac').textContent = ac;
+    document.getElementById('stat-kicked').textContent = kickedData.length;
+    document.getElementById('kicked-count').textContent = kickedData.length;
+    const activeViolations = violationsData.filter(v => v.status === 'active').length;
+    document.getElementById('stat-violations').textContent = activeViolations;
+    document.getElementById('violations-count').textContent = activeViolations;
+    document.getElementById('questions-count').textContent = questionsData.length;
+    const bannerCount = document.getElementById('banner-questions-count');
+    if (bannerCount) bannerCount.textContent = `${questionsData.length} problem${questionsData.length === 1 ? '' : 's'}`;
+  }
+
+  function updateScoreboard() {
+    const tbody = document.getElementById('leaderboard-tbody');
+    const filtered = scoreboardData.filter(r =>
+      !searchTerm || r.name.toLowerCase().includes(searchTerm) || r.roll.toLowerCase().includes(searchTerm)
+    );
+
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="${5 + problemsList.length}" style="text-align:center; padding:32px;" class="muted">No active contestants</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(r => {
+      let medal = `#${r.rank}`;
+      if (r.rank === 1) medal = '🥇 1';
+      else if (r.rank === 2) medal = '🥈 2';
+      else if (r.rank === 3) medal = '🥉 3';
+
+      const probCells = problemsList.map(p => {
+        const st = r.problems?.[p.id];
+        if (st?.solved) return `<td class="right"><span class="badge-solved">✓ ${p.points}</span></td>`;
+        if (st?.attempts) return `<td class="right"><span class="badge-unsolved">${st.attempts} att</span></td>`;
+        return `<td class="right muted">·</td>`;
+      }).join('');
+
+      return `
+        <tr>
+          <td class="num strong">${medal}</td>
+          <td class="strong">${escapeHtml(r.name)}</td>
+          <td class="mono muted">${escapeHtml(r.roll)}</td>
+          ${probCells}
+          <td class="right strong" style="font-size:16px; color:var(--accent);">${r.score}</td>
+          <td class="right">
+            <button class="btn-danger-sm btn-kick" data-roll="${escapeHtml(r.roll)}" data-name="${escapeHtml(r.name)}">🚫 Kick</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    // Attach kick listeners
+    tbody.querySelectorAll('.btn-kick').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const roll = btn.dataset.roll;
+        const name = btn.dataset.name;
+        kickContestant(roll, name);
+      });
+    });
+  }
+
+  function updateFeed() {
+    const tbody = document.getElementById('feed-tbody');
+    const filtered = submissionsData.filter(s =>
+      !searchTerm || s.name.toLowerCase().includes(searchTerm) || s.roll.toLowerCase().includes(searchTerm) || s.problem.toLowerCase().includes(searchTerm)
+    );
+
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:32px;" class="muted">No submissions recorded yet</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(s => {
+      const timeStr = s.submitted_at ? new Date(s.submitted_at).toLocaleTimeString() : '—';
+      let badgeCls = 'badge-bad';
+      if (s.verdict === 'AC') badgeCls = 'badge-ok';
+      else if (['CE', 'NJ'].includes(s.verdict)) badgeCls = 'badge-warn';
+
+      return `
+        <tr>
+          <td class="num muted">${s.id}</td>
+          <td class="num">${timeStr}</td>
+          <td class="strong">${escapeHtml(s.name)}</td>
+          <td class="mono muted">${escapeHtml(s.roll)}</td>
+          <td class="strong">${escapeHtml(s.problem)}</td>
+          <td class="muted">${escapeHtml(s.lang)}</td>
+          <td><span class="badge ${badgeCls}">${escapeHtml(s.verdict)}</span></td>
+          <td class="right num">${s.passed}/${s.total}</td>
+          <td class="right num">${s.time_ms ? s.time_ms.toFixed(0) + ' ms' : '—'}</td>
+          <td class="right">
+            <button class="btn-inspect-sm btn-view-code" data-id="${s.id}" data-roll="${escapeHtml(s.roll)}" data-problem="${escapeHtml(s.problem)}">👁️ View</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    tbody.querySelectorAll('.btn-view-code').forEach(btn => {
+      btn.addEventListener('click', () => inspectCode(btn.dataset.id, btn.dataset.roll, btn.dataset.problem));
+    });
+  }
+
+  function updateKickedUI() {
+    const tbody = document.getElementById('kicked-tbody');
+    if (!kickedData.length) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:32px;" class="muted">No students currently disqualified.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = kickedData.map(k => `
+      <tr>
+        <td class="mono strong" style="color:var(--danger-text);">${escapeHtml(k.roll)}</td>
+        <td class="strong">${escapeHtml(k.name || '—')}</td>
+        <td class="muted">${escapeHtml(k.reason)}</td>
+        <td class="num muted">${k.kicked_at ? new Date(k.kicked_at).toLocaleTimeString() : '—'}</td>
+        <td class="right">
+          <button class="btn-restore-sm btn-unkick" data-roll="${escapeHtml(k.roll)}">✓ Restore</button>
+        </td>
+      </tr>
+    `).join('');
+
+    tbody.querySelectorAll('.btn-unkick').forEach(btn => {
+      btn.addEventListener('click', () => unkickContestant(btn.dataset.roll));
+    });
+  }
+
+  async function kickContestant(roll, name) {
+    const reason = prompt(`Disqualify contestant ${name} (${roll})?\nReason for disqualification:`, 'Violation of contest rules');
+    if (!reason) return;
+    try {
+      const res = await api('/api/admin/kick', {
+        method: 'POST',
+        body: { roll, name, reason }
+      });
+      if (res.ok) {
+        toast(`Disqualified ${roll}`, 'warn');
+        loadAll();
+      }
+    } catch (e) {
+      toast('Failed to kick contestant', 'bad');
+    }
+  }
+
+  async function unkickContestant(roll) {
+    if (!confirm(`Restore contestant ${roll} and permit them to resume the contest?`)) return;
+    try {
+      const res = await api('/api/admin/unkick', {
+        method: 'POST',
+        body: { roll }
+      });
+      if (res.ok) {
+        toast(`Restored ${roll}`, 'ok');
+        loadAll();
+      }
+    } catch (e) {
+      toast('Failed to restore contestant', 'bad');
+    }
+  }
+
+  function updateViolationsUI() {
+    const tbody = document.getElementById('violations-tbody');
+    if (!tbody) return;
+    if (!violationsData.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:32px;" class="muted">No security violations recorded.</td></tr>`;
+      return;
+    }
+
+    const filtered = violationsData.filter(v =>
+      !searchTerm || (v.name && v.name.toLowerCase().includes(searchTerm)) || v.roll.toLowerCase().includes(searchTerm) || v.event_type.toLowerCase().includes(searchTerm)
+    );
+
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:32px;" class="muted">No matching security violations</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(v => {
+      const isBlocked = v.status === 'active';
+      const statusBadge = isBlocked
+        ? '<span class="badge badge-bad">BLOCKED</span>'
+        : '<span class="badge badge-ok">PARDONED</span>';
+
+      return `
+        <tr>
+          <td class="mono strong" style="color:var(--danger-text);">${escapeHtml(v.roll)}</td>
+          <td class="strong">${escapeHtml(v.name || '—')}</td>
+          <td><span class="badge badge-warn">${escapeHtml(v.event_type)}</span></td>
+          <td style="font-size:13px; max-width:320px;">${escapeHtml(v.detail)}</td>
+          <td class="num muted">${v.timestamp ? new Date(v.timestamp).toLocaleTimeString() : '—'}</td>
+          <td>${statusBadge}</td>
+          <td class="right">
+            ${isBlocked ? `<button class="btn-restore-sm btn-unblock-v" data-roll="${escapeHtml(v.roll)}" title="Pardon student and restore exam screen">🔓 Unblock</button>` : `<span class="muted small">Restored</span>`}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    tbody.querySelectorAll('.btn-unblock-v').forEach(btn => {
+      btn.addEventListener('click', () => unblockContestant(btn.dataset.roll));
+    });
+  }
+
+  async function unblockContestant(roll) {
+    if (!confirm(`Pardon student ${roll} and restore their exam screen immediately?`)) return;
+    try {
+      const res = await api('/api/admin/unblock', {
+        method: 'POST',
+        body: { roll }
+      });
+      if (res.ok) {
+        toast(`Pardoned and unblocked ${roll}`, 'ok');
+        loadAll();
+      }
+    } catch {
+      toast('Failed to unblock contestant', 'bad');
+    }
+  }
+
+  async function inspectCode(id, roll, problem) {
+    try {
+      const res = await api(`/api/admin/source?id=${id}`);
+      if (res.ok) {
+        const data = await res.json();
+        document.getElementById('modal-code-title').textContent = `Submission #${id} · Problem ${problem}`;
+        document.getElementById('modal-code-meta').textContent = `${data.name} (${data.roll}) · ${data.lang} · Verdict: ${data.verdict}`;
+        document.getElementById('code-display').textContent = data.source || '// No code found';
+        document.getElementById('code-modal').showModal();
+      }
+    } catch {
+      toast('Could not fetch source code', 'bad');
+    }
+  }
+
+  document.getElementById('btn-close-code').addEventListener('click', () => {
+    document.getElementById('code-modal').close();
+  });
+
+  // Timer Controls
+  document.getElementById('btn-timer-start').addEventListener('click', async () => {
+    await api('/api/admin/timer', { method: 'POST', body: { action: 'resume' } });
+    toast('Contest timer resumed/started', 'ok');
+    loadAll();
+  });
+
+  document.getElementById('btn-timer-pause').addEventListener('click', async () => {
+    await api('/api/admin/timer', { method: 'POST', body: { action: 'pause' } });
+    toast('Contest paused for all contestants', 'warn');
+    loadAll();
+  });
+
+  document.querySelectorAll('[data-add]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const mins = parseInt(btn.dataset.add, 10);
+      await api('/api/admin/timer', { method: 'POST', body: { action: 'add_time', minutes: mins } });
+      toast(`Added +${mins} minutes to contest`, 'info');
+      loadAll();
+    });
+  });
+
+  document.getElementById('btn-timer-reset').addEventListener('click', async () => {
+    const minsStr = prompt('Set contest timer duration in minutes:', '120');
+    if (!minsStr) return;
+    const mins = parseInt(minsStr, 10) || 120;
+    await api('/api/admin/timer', { method: 'POST', body: { action: 'reset', minutes: mins } });
+    toast(`Contest timer reset to ${mins} minutes`, 'ok');
+    loadAll();
+  });
+
+  // Announcement
+  document.getElementById('btn-send-announcement').addEventListener('click', async () => {
+    const message = document.getElementById('announcement-input').value.trim();
+    await api('/api/admin/announcement', { method: 'POST', body: { message } });
+    toast('Announcement broadcasted to all screens', 'ok');
+  });
+
+  document.getElementById('btn-clear-announcement').addEventListener('click', async () => {
+    document.getElementById('announcement-input').value = '';
+    await api('/api/admin/announcement', { method: 'POST', body: { message: '' } });
+    toast('Announcement cleared', 'info');
+  });
+
+  // Wipe / Reset Contest
+  document.getElementById('btn-wipe-contest').addEventListener('click', async () => {
+    const confirmText = prompt('DANGER: This will delete ALL submissions and restore scores to zero.\nType "WIPE" to confirm:');
+    if (confirmText !== 'WIPE') {
+      toast('Reset cancelled', 'info');
+      return;
+    }
+    await api('/api/admin/reset', { method: 'POST', body: { wipeSubmissions: true, resetTimer: true } });
+    toast('All contest submissions wiped cleanly!', 'warn');
+    loadAll();
+  });
+
+  // Search
+  document.getElementById('search-box').addEventListener('input', e => {
+    searchTerm = e.target.value.trim().toLowerCase();
+    updateScoreboard();
+    updateFeed();
+    updateViolationsUI();
+    updateQuestionsUI();
+  });
+
+  // Tabs
+  const tabLb = document.getElementById('tab-leaderboard');
+  const tabFeed = document.getElementById('tab-feed');
+  const tabQuestions = document.getElementById('tab-questions');
+  const tabKicked = document.getElementById('tab-kicked');
+  const tabViolations = document.getElementById('tab-violations');
+  const panelQuestions = document.getElementById('panel-questions');
+  const panelViolations = document.getElementById('panel-violations');
+
+  function selectTab(activeTab, activePanel) {
+    [tabLb, tabFeed, tabQuestions, tabKicked, tabViolations].forEach(t => t?.classList.remove('active'));
+    [
+      document.getElementById('panel-leaderboard'),
+      document.getElementById('panel-feed'),
+      panelQuestions,
+      document.getElementById('panel-kicked'),
+      panelViolations
+    ].forEach(p => p && (p.hidden = true));
+
+    activeTab?.classList.add('active');
+    if (activePanel) activePanel.hidden = false;
+  }
+
+  tabLb.addEventListener('click', () => selectTab(tabLb, document.getElementById('panel-leaderboard')));
+  tabFeed.addEventListener('click', () => selectTab(tabFeed, document.getElementById('panel-feed')));
+  tabQuestions.addEventListener('click', () => selectTab(tabQuestions, panelQuestions));
+  tabKicked.addEventListener('click', () => selectTab(tabKicked, document.getElementById('panel-kicked')));
+  tabViolations.addEventListener('click', () => selectTab(tabViolations, panelViolations));
+
+  // ==========================================
+  // Question & Test Suite Management
+  // ==========================================
+
+  function updateQuestionsUI() {
+    const tbody = document.getElementById('questions-tbody');
+    if (!tbody) return;
+    if (!questionsData.length) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:32px;" class="muted">No questions found. Click "Create New Question" to add one.</td></tr>`;
+      return;
+    }
+
+    const filtered = questionsData.filter(q =>
+      !searchTerm ||
+      q.id.toLowerCase().includes(searchTerm) ||
+      q.title.toLowerCase().includes(searchTerm) ||
+      (q.difficulty && q.difficulty.toLowerCase().includes(searchTerm))
+    );
+
+    if (!filtered.length) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:32px;" class="muted">No matching questions found.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = filtered.map(q => {
+      const diffCls = q.difficulty ? `badge-${q.difficulty.toLowerCase()}` : 'badge-medium';
+      const sampleCount = (q.samples || []).length;
+      const hiddenCount = q.hiddenTestCount || 0;
+
+      return `
+        <tr>
+          <td><span class="badge-qid">${escapeHtml(q.id)}</span></td>
+          <td>
+            <div class="strong" style="font-size:15px;">${escapeHtml(q.title)}</div>
+            <div class="muted small" style="margin-top:2px; max-width:380px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+              ${escapeHtml((q.statement || '').split('\n')[0])}
+            </div>
+          </td>
+          <td><span class="badge ${diffCls}">${escapeHtml(q.difficulty || 'Medium')}</span></td>
+          <td class="right mono strong" style="color:var(--accent); font-size:15px;">${q.points}</td>
+          <td class="right mono text-2">${q.timeLimitMs || 2000} ms</td>
+          <td class="right mono">${sampleCount}</td>
+          <td class="right"><span class="badge badge-ok">${hiddenCount} tests</span></td>
+          <td class="right">
+            <button class="btn btn-primary btn-sm btn-edit-q" data-id="${escapeHtml(q.id)}">✏️ Edit</button>
+            <button class="btn btn-ghost btn-sm btn-export-q" data-id="${escapeHtml(q.id)}" title="Download test suite JSON">📥 Tests</button>
+            <button class="btn btn-danger-sm btn-del-q" data-id="${escapeHtml(q.id)}" data-title="${escapeHtml(q.title)}" title="Delete question">🗑️</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    // Attach listeners
+    tbody.querySelectorAll('.btn-edit-q').forEach(btn => {
+      btn.addEventListener('click', () => openQuestionModal(btn.dataset.id));
+    });
+    tbody.querySelectorAll('.btn-export-q').forEach(btn => {
+      btn.addEventListener('click', () => exportQuestionTests(btn.dataset.id));
+    });
+    tbody.querySelectorAll('.btn-del-q').forEach(btn => {
+      btn.addEventListener('click', () => deleteQuestion(btn.dataset.id, btn.dataset.title));
+    });
+  }
+
+  function renderSamples() {
+    const container = document.getElementById('samples-container');
+    if (!container) return;
+    if (!editingSamples.length) {
+      container.innerHTML = `<div class="muted small" style="text-align:center; padding:12px; border:1px dashed var(--border); border-radius:var(--r);">No samples added yet. Click "+ Add Sample".</div>`;
+      return;
+    }
+
+    container.innerHTML = editingSamples.map((s, idx) => `
+      <div class="sample-card" data-idx="${idx}">
+        <div class="sample-header">
+          <span style="color:var(--accent);">Sample #${idx + 1}</span>
+          <button type="button" class="btn btn-ghost btn-sm btn-del-sample" data-idx="${idx}" style="color:var(--danger-text); padding:2px 8px;">✕ Remove</button>
+        </div>
+        <div class="sample-grid">
+          <div class="form-group">
+            <label class="form-label" style="font-size:11px;">Input (stdin)</label>
+            <textarea class="form-textarea mono sample-input" rows="3" data-idx="${idx}" placeholder="Sample input...">${escapeHtml(s.input || '')}</textarea>
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-size:11px;">Expected Output (stdout)</label>
+            <textarea class="form-textarea mono sample-output" rows="3" data-idx="${idx}" placeholder="Sample output...">${escapeHtml(s.output || '')}</textarea>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label" style="font-size:11px;">Explanation / Note (Optional)</label>
+          <input type="text" class="form-input sample-note" data-idx="${idx}" value="${escapeHtml(s.note || '')}" placeholder="Brief explanation of sample...">
+        </div>
+      </div>
+    `).join('');
+
+    // Wire up inputs
+    container.querySelectorAll('.sample-input').forEach(el => {
+      el.addEventListener('input', e => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        if (editingSamples[idx]) editingSamples[idx].input = e.target.value;
+      });
+    });
+    container.querySelectorAll('.sample-output').forEach(el => {
+      el.addEventListener('input', e => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        if (editingSamples[idx]) editingSamples[idx].output = e.target.value;
+      });
+    });
+    container.querySelectorAll('.sample-note').forEach(el => {
+      el.addEventListener('input', e => {
+        const idx = parseInt(e.target.dataset.idx, 10);
+        if (editingSamples[idx]) editingSamples[idx].note = e.target.value;
+      });
+    });
+    container.querySelectorAll('.btn-del-sample').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.idx, 10);
+        editingSamples.splice(idx, 1);
+        renderSamples();
+      });
+    });
+  }
+
+  function validateTestsJson() {
+    const raw = document.getElementById('qmodal-tests-raw').value.trim();
+    const badge = document.getElementById('tests-count-badge');
+    const status = document.getElementById('tests-syntax-status');
+    if (!raw) {
+      badge.textContent = '0 Tests';
+      badge.className = 'badge';
+      status.textContent = 'ℹ️ No hidden test cases defined yet.';
+      status.style.color = 'var(--text-2)';
+      return [];
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        badge.textContent = 'Invalid Format';
+        badge.className = 'badge badge-bad';
+        status.textContent = '❌ JSON must be an array: [{"input": "...", "output": "..."}]';
+        status.style.color = 'var(--danger-text)';
+        return null;
+      }
+      badge.textContent = `${parsed.length} Test${parsed.length === 1 ? '' : 's'}`;
+      badge.className = 'badge badge-ok';
+      status.textContent = `✓ Valid JSON (${parsed.length} test cases detected)`;
+      status.style.color = 'var(--ok)';
+      return parsed;
+    } catch (err) {
+      badge.textContent = 'Syntax Error';
+      badge.className = 'badge badge-bad';
+      status.textContent = `❌ ${err.message}`;
+      status.style.color = 'var(--danger-text)';
+      return null;
+    }
+  }
+
+  async function openQuestionModal(qid = null) {
+    const modal = document.getElementById('question-modal');
+    const heading = document.getElementById('qmodal-heading');
+    const idInput = document.getElementById('qmodal-id');
+    const titleInput = document.getElementById('qmodal-title');
+    const diffSelect = document.getElementById('qmodal-diff');
+    const pointsInput = document.getElementById('qmodal-points');
+    const timeLimitInput = document.getElementById('qmodal-timelimit');
+    const stmtTextarea = document.getElementById('qmodal-statement');
+    const constrTextarea = document.getElementById('qmodal-constraints');
+    const testsRaw = document.getElementById('qmodal-tests-raw');
+    const btnDel = document.getElementById('btn-modal-delete-q');
+
+    editingQuestionId = qid;
+
+    if (qid) {
+      heading.textContent = `Edit Question ${qid}`;
+      btnDel.style.display = 'inline-block';
+      idInput.value = qid;
+      idInput.readOnly = true;
+
+      try {
+        const res = await api(`/api/admin/question?id=${encodeURIComponent(qid)}`);
+        if (!res.ok) throw new Error('Failed to load question details');
+        const data = await res.json();
+        const q = data.question;
+        titleInput.value = q.title || '';
+        diffSelect.value = q.difficulty || 'Medium';
+        pointsInput.value = q.points || 100;
+        timeLimitInput.value = q.timeLimitMs || 2000;
+        stmtTextarea.value = q.statement || '';
+        constrTextarea.value = (q.constraints || []).join('\n');
+        editingSamples = (q.samples || []).map(s => ({
+          input: s.input || '',
+          output: s.output || '',
+          note: s.note || ''
+        }));
+        testsRaw.value = JSON.stringify(data.tests || [], null, 2);
+      } catch (err) {
+        toast('Error loading question details: ' + err.message, 'bad');
+        return;
+      }
+    } else {
+      // New question: pick next letter
+      const existingIds = new Set(questionsData.map(q => q.id));
+      let nextLetter = 'A';
+      for (let c = 65; c <= 90; c++) {
+        const letter = String.fromCharCode(c);
+        if (!existingIds.has(letter)) {
+          nextLetter = letter;
+          break;
+        }
+      }
+      heading.textContent = 'Create New Question';
+      btnDel.style.display = 'none';
+      idInput.value = nextLetter;
+      idInput.readOnly = false;
+      titleInput.value = '';
+      diffSelect.value = 'Medium';
+      pointsInput.value = 100;
+      timeLimitInput.value = 2000;
+      stmtTextarea.value = '';
+      constrTextarea.value = '';
+      editingSamples = [
+        { input: '', output: '', note: '' }
+      ];
+      testsRaw.value = '[\n  {\n    "input": "",\n    "output": ""\n  }\n]';
+    }
+
+    renderSamples();
+    validateTestsJson();
+    modal.showModal();
+  }
+
+  async function saveQuestion() {
+    const qid = document.getElementById('qmodal-id').value.trim().toUpperCase();
+    const title = document.getElementById('qmodal-title').value.trim();
+    const difficulty = document.getElementById('qmodal-diff').value;
+    const points = parseInt(document.getElementById('qmodal-points').value, 10) || 100;
+    const timeLimitMs = parseInt(document.getElementById('qmodal-timelimit').value, 10) || 2000;
+    const statement = document.getElementById('qmodal-statement').value.trim();
+    const rawConstr = document.getElementById('qmodal-constraints').value;
+    const constraints = rawConstr.split('\n').map(s => s.trim()).filter(Boolean);
+
+    if (!qid) {
+      toast('Problem ID is required', 'warn');
+      document.getElementById('qmodal-id').focus();
+      return;
+    }
+    if (!title) {
+      toast('Problem title is required', 'warn');
+      document.getElementById('qmodal-title').focus();
+      return;
+    }
+    if (!statement) {
+      toast('Problem statement is required', 'warn');
+      document.getElementById('qmodal-statement').focus();
+      return;
+    }
+
+    const parsedTests = validateTestsJson();
+    if (parsedTests === null) {
+      toast('Please fix JSON syntax errors in Hidden Test Cases', 'bad');
+      document.getElementById('qmodal-tests-raw').focus();
+      return;
+    }
+
+    // Prepare samples
+    const samples = editingSamples
+      .filter(s => s.input.trim() || s.output.trim())
+      .map(s => ({
+        input: s.input.endsWith('\n') ? s.input : s.input + '\n',
+        output: s.output.endsWith('\n') ? s.output : s.output + '\n',
+        ...(s.note ? { note: s.note.trim() } : {})
+      }));
+
+    const payload = {
+      question: {
+        id: qid,
+        title,
+        difficulty,
+        points,
+        timeLimitMs,
+        statement,
+        constraints,
+        samples
+      },
+      tests: parsedTests
+    };
+
+    const btnSave = document.getElementById('btn-save-question');
+    btnSave.disabled = true;
+    btnSave.textContent = 'Saving…';
+
+    try {
+      const res = await api('/api/admin/question/save', {
+        method: 'POST',
+        body: payload
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast(`Question ${qid} saved successfully!`, 'ok');
+        document.getElementById('question-modal').close();
+        loadAll();
+      } else {
+        toast(data.error || 'Failed to save question', 'bad');
+      }
+    } catch (err) {
+      toast('Failed to save question: ' + err.message, 'bad');
+    } finally {
+      btnSave.disabled = false;
+      btnSave.textContent = '💾 Save Question & Tests';
+    }
+  }
+
+  async function deleteQuestion(qid, title = '') {
+    if (!confirm(`Are you sure you want to delete Problem ${qid} (${title || 'Question'})?\nThis will remove the question and all associated test cases!`)) {
+      return;
+    }
+    try {
+      const res = await api('/api/admin/question/delete', {
+        method: 'POST',
+        body: { id: qid }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast(`Question ${qid} deleted`, 'ok');
+        if (editingQuestionId === qid) {
+          document.getElementById('question-modal').close();
+        }
+        loadAll();
+      } else {
+        toast(data.error || 'Failed to delete question', 'bad');
+      }
+    } catch (err) {
+      toast('Failed to delete question: ' + err.message, 'bad');
+    }
+  }
+
+  async function exportQuestionTests(qid) {
+    try {
+      const res = await api(`/api/admin/question?id=${encodeURIComponent(qid)}`);
+      if (!res.ok) throw new Error('Failed to fetch tests');
+      const data = await res.json();
+      const jsonStr = JSON.stringify(data.tests || [], null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${qid}_test_cases.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast(`Downloaded test suite for Problem ${qid}`, 'ok');
+    } catch (err) {
+      toast('Failed to export test cases: ' + err.message, 'bad');
+    }
+  }
+
+  // Modal event wiring
+  document.getElementById('btn-add-question')?.addEventListener('click', () => openQuestionModal(null));
+  document.getElementById('btn-close-qmodal')?.addEventListener('click', () => document.getElementById('question-modal').close());
+  document.getElementById('btn-cancel-qmodal')?.addEventListener('click', () => document.getElementById('question-modal').close());
+  document.getElementById('btn-save-question')?.addEventListener('click', saveQuestion);
+  document.getElementById('btn-modal-delete-q')?.addEventListener('click', () => {
+    if (editingQuestionId) deleteQuestion(editingQuestionId);
+  });
+  document.getElementById('btn-add-sample')?.addEventListener('click', () => {
+    editingSamples.push({ input: '', output: '', note: '' });
+    renderSamples();
+  });
+  document.getElementById('qmodal-tests-raw')?.addEventListener('input', validateTestsJson);
+
+  // Upload .json file of tests
+  const fileInput = document.getElementById('tests-file-input');
+  document.getElementById('btn-upload-file')?.addEventListener('click', () => fileInput?.click());
+  fileInput?.addEventListener('change', e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const parsed = JSON.parse(ev.target.result);
+        if (!Array.isArray(parsed)) throw new Error('Root JSON must be an array of test case objects');
+        document.getElementById('qmodal-tests-raw').value = JSON.stringify(parsed, null, 2);
+        validateTestsJson();
+        toast(`Loaded ${parsed.length} test cases from ${file.name}`, 'ok');
+      } catch (err) {
+        toast(`File parse error: ${err.message}`, 'bad');
+      }
+    };
+    reader.readAsText(file);
+    fileInput.value = '';
+  });
+
+  // Prettify / Format tests JSON
+  document.getElementById('btn-format-tests')?.addEventListener('click', () => {
+    const parsed = validateTestsJson();
+    if (parsed) {
+      document.getElementById('qmodal-tests-raw').value = JSON.stringify(parsed, null, 2);
+      toast('Test cases JSON formatted', 'info');
+    }
+  });
+
+  // Copy sample cases into hidden test suite
+  document.getElementById('btn-copy-samples-to-tests')?.addEventListener('click', () => {
+    const validSamples = editingSamples
+      .filter(s => s.input.trim() || s.output.trim())
+      .map(s => ({
+        input: s.input.endsWith('\n') ? s.input : s.input + '\n',
+        output: s.output.endsWith('\n') ? s.output : s.output + '\n'
+      }));
+    if (!validSamples.length) {
+      toast('No valid sample test cases found to copy', 'warn');
+      return;
+    }
+    let existingTests = [];
+    try {
+      const cur = JSON.parse(document.getElementById('qmodal-tests-raw').value);
+      if (Array.isArray(cur)) existingTests = cur;
+    } catch {}
+    const combined = [...existingTests, ...validSamples];
+    document.getElementById('qmodal-tests-raw').value = JSON.stringify(combined, null, 2);
+    validateTestsJson();
+    toast(`Copied ${validSamples.length} samples into hidden test suite`, 'ok');
+  });
+
+  // Quick jump from KPI card to Violations tab
+  document.getElementById('kpi-card-violations')?.addEventListener('click', () => {
+    tabViolations.click();
+  });
+
+  // Toggle audible sound alert chime
+  const btnSound = document.getElementById('btn-sound-toggle');
+  btnSound?.addEventListener('click', () => {
+    soundAlertEnabled = !soundAlertEnabled;
+    btnSound.textContent = soundAlertEnabled ? '🔊 Alert Chime: ON' : '🔈 Alert Chime: OFF';
+    toast(soundAlertEnabled ? 'Audible alert chime enabled' : 'Audible alert chime silenced', 'info');
+  });
+
+  // Projector Toggle
+  document.getElementById('btn-projector').addEventListener('click', () => {
+    document.body.classList.toggle('projector');
+    const on = document.body.classList.contains('projector');
+    document.getElementById('btn-projector').textContent = on ? '✕ Normal View' : '🖥 Projector Mode';
+  });
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str).replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+  }
+
+  // Poll every 3 seconds
+  setInterval(() => {
+    if (token) loadAll();
+  }, 3000);
+</script>
+
+</body>
+</html>

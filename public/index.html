@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CODE//ARENA</title>
+  <meta name="description" content="Contest arena with in-browser code execution, built for Safe Exam Browser.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23202520'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='14' font-weight='700' fill='%232ab406' text-anchor='middle'%3E//%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/app.css">
+  <script type="module" src="js/app.js?v=2.2.0"></script>
+</head>
+<body>
+
+<div class="boot" id="boot" role="status"><span class="spinner" aria-hidden="true"></span><span>Starting contest…</span></div>
+<noscript><div class="boot">JavaScript is required to take part in this contest.</div></noscript>
+
+<!-- ===================================================== Screen 1 · Contestant Entry -->
+<section class="screen login-screen" id="screen-login" hidden>
+  <div class="login-wrap">
+    <div class="brand login-brand"><span class="brand-mark">//</span><span class="brand-name" data-brand></span></div>
+
+    <form class="card login-card" id="login-form" novalidate autocomplete="off">
+      <div class="login-head">
+        <p class="eyebrow" id="login-round"></p>
+        <h1>Enter the Coding Arena</h1>
+        <p class="text-2">Sign in with your registered Student ID / Roll Number and Password.</p>
+      </div>
+
+      <div id="login-alert" class="login-alert" hidden></div>
+
+      <div class="field" data-field="roll">
+        <label for="f-roll">Roll Number / Student ID</label>
+        <input class="input mono" id="f-roll" name="roll" maxlength="24" autocapitalize="characters" spellcheck="false" placeholder="e.g. 25R21A05JR" required autofocus>
+        <span class="error">Enter your registered Roll Number.</span>
+      </div>
+
+      <div class="field" data-field="password">
+        <label for="f-password">Password</label>
+        <div class="input-password-wrap">
+          <input class="input" id="f-password" name="password" type="password" placeholder="Enter your password" required autocomplete="current-password">
+          <button type="button" class="btn-toggle-pw" id="btn-toggle-pw" title="Show/Hide Password" tabindex="-1">👁️</button>
+        </div>
+        <span class="error">Enter your registered password.</span>
+      </div>
+
+      <button class="btn btn-primary btn-lg btn-block" type="submit" id="login-btn">
+        <span id="login-btn-text">Verify &amp; Enter Contest</span>
+        <i data-icon="arrow"></i>
+      </button>
+    </form>
+
+    <footer class="login-foot">
+      <span class="muted" id="login-meta"></span>
+    </footer>
+  </div>
+</section>
+
+<!-- ===================================================== Screen 2 · Arena -->
+<section class="screen arena-screen" id="screen-arena" hidden>
+  <header class="arena-bar">
+    <div class="brand"><span class="brand-mark">//</span><span class="brand-name" data-brand></span></div>
+    <span class="event" id="arena-event"></span>
+    <div class="center">
+      <div class="timer" id="timer" role="timer" aria-live="off"><small>Time left</small><span id="timer-val" class="num">--:--:--</span></div>
+    </div>
+    <div class="right">
+      <span id="network-pill" class="net-status net-online" title="Network status"><span class="net-dot"></span><span>Online</span></span>
+      <button class="btn btn-ghost btn-sm" id="fullscreen-btn" title="Toggle Fullscreen Mode"><i data-icon="maximize"></i><span class="hide-sm" id="fullscreen-btn-label">Fullscreen</span></button>
+      <span id="arena-env"></span>
+      <span class="who" id="who"></span>
+      <span class="save-state saved" id="save-state"><i></i><span>Saved</span></span>
+      <button class="btn btn-secondary btn-sm" id="end-btn"><i data-icon="logout"></i><span class="hide-sm">End session</span></button>
+    </div>
+  </header>
+
+  <div id="fullscreen-banner" class="fullscreen-banner" hidden>
+    <div class="fullscreen-banner-content">
+      <span class="fullscreen-banner-icon">⛶</span>
+      <span><b>Fullscreen Exam Mode Recommended:</b> Hides browser tabs and address bar to prevent accidental tab switching or unfocus.</span>
+    </div>
+    <button class="btn btn-primary btn-sm" id="btn-banner-fullscreen">Go Fullscreen</button>
+  </div>
+
+  <nav class="arena-mobile-tabs seg" aria-label="Arena panels" id="panel-tabs">
+    <button class="active" data-panel="problem">Problem</button>
+    <button data-panel="code">Code</button>
+    <button data-panel="output">Output</button>
+  </nav>
+
+  <main class="arena" id="arena" data-panel="problem">
+    <!-- LEFT: problem + status -->
+    <section class="arena-left" aria-label="Problem">
+      <div class="q-tabs" role="tablist" id="q-tabs"></div>
+      <div class="tabs view-tabs" id="view-tabs" role="tablist">
+        <button class="active" data-view="problem" role="tab">Problem</button>
+        <button data-view="status" role="tab">Scoreboard &amp; status</button>
+      </div>
+      <div class="pane-scroll" id="view-problem"></div>
+      <div class="pane-scroll" id="view-status" hidden></div>
+    </section>
+
+    <div class="split-handle" id="split-handle" role="separator" aria-orientation="vertical" aria-label="Resize panels" tabindex="0"></div>
+
+    <!-- RIGHT: editor + console drawer -->
+    <section class="arena-right" aria-label="Editor">
+      <div class="editor-bar">
+        <label class="sr-only" for="lang">Language</label>
+        <select class="select" id="lang"></select>
+        <span class="file mono" id="file-name">main.cpp</span>
+        <span class="engine" id="engine-note"></span>
+        <span class="grow"></span>
+        <button class="btn btn-ghost btn-sm" id="reset-btn" title="Reset to the starter template"><i data-icon="refresh"></i><span class="hide-sm">Reset</span></button>
+        <button class="btn btn-secondary btn-sm" id="run-btn" title="Run sample tests (Ctrl/⌘ + Enter)"><i data-icon="play"></i>Run<span class="hide-md"> sample tests</span></button>
+        <button class="btn btn-primary btn-sm" id="submit-btn" title="Submit (Ctrl/⌘ + Shift + Enter)"><i data-icon="send"></i>Submit<span class="hide-md"> solution</span></button>
+      </div>
+
+      <div class="editor-host" id="editor"><div class="editor-loading"><span class="spinner"></span>Loading editor…</div></div>
+
+      <div class="drawer" id="drawer">
+        <div class="drawer-grip" id="drawer-grip" role="separator" aria-orientation="horizontal" aria-label="Resize console" tabindex="0"></div>
+        <div class="drawer-head">
+          <div class="tabs" id="console-tabs" role="tablist">
+            <button class="active" data-tab="console" role="tab">Console</button>
+            <button data-tab="tests" role="tab">Test results</button>
+          </div>
+          <span class="status-pill" id="status-pill" aria-live="polite">Idle</span>
+          <button class="btn btn-ghost btn-sm icon-btn" id="drawer-toggle" aria-expanded="true" aria-label="Collapse console"><i data-icon="chevron"></i></button>
+        </div>
+        <div class="drawer-body">
+          <div data-pane="console">
+            <div id="verdict"></div>
+            <pre class="console-out" id="console-out"><span class="dim">Ready. Run sample tests with Ctrl/⌘ + Enter, submit with Ctrl/⌘ + Shift + Enter.</span></pre>
+          </div>
+          <div data-pane="tests" hidden><div class="tests" id="tests"><div class="empty">Run your code to see sample test results.</div></div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</section>
+
+<dialog class="modal" id="modal">
+  <form method="dialog">
+    <h3 id="modal-title"></h3>
+    <div class="modal-body text-2" id="modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" value="cancel" id="modal-cancel">Cancel</button>
+      <button class="btn btn-primary" value="ok" id="modal-ok">Confirm</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- ===================================================== Lockdown Violation Overlay -->
+<div id="lockdown-violation-screen" class="lockdown-overlay" hidden>
+  <div class="lockdown-card">
+    <div class="lockdown-icon">🚨</div>
+    <h1 class="lockdown-title">EXAM BLOCKED · SECURITY VIOLATION</h1>
+    <p class="lockdown-subtitle">You left or attempted to escape the secure exam environment.</p>
+
+    <div class="lockdown-details">
+      <div class="lockdown-row">
+        <span class="lockdown-label">Contestant:</span>
+        <span id="violation-who" class="mono">--</span>
+      </div>
+      <div class="lockdown-row">
+        <span class="lockdown-label">Violation Type:</span>
+        <span id="violation-type" class="badge badge-bad">--</span>
+      </div>
+      <div class="lockdown-row">
+        <span class="lockdown-label">Incident Detail:</span>
+        <span id="violation-detail">--</span>
+      </div>
+      <div class="lockdown-row">
+        <span class="lockdown-label">Recorded At:</span>
+        <span id="violation-time" class="mono">--</span>
+      </div>
+      <div class="lockdown-row">
+        <span class="lockdown-label">Lockdown State:</span>
+        <span class="badge badge-bad">SESSION BLOCKED & REPORTED</span>
+      </div>
+    </div>
+
+    <div class="lockdown-notice">
+      <p>⚠️ Your editor is frozen and your session has been flagged to the exam administrator.</p>
+      <p class="muted small" style="margin-top:8px;">If this occurred due to an authorized reason, call your invigilator immediately to unblock your session from the Admin Control Center.</p>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "codearena",
+  "version": "2.0.0",
+  "description": "Lightweight Coding Contest Platform with Live Proctor Dashboard",
+  "scripts": {
+    "start": "python3 serve.py",
+    "tunnel": "python3 start_tunnel.py"
+  }
+}
