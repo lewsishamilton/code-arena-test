@@ -641,6 +641,7 @@
       <button class="active" id="tab-leaderboard">Live Leaderboard</button>
       <button id="tab-feed">Submissions Stream</button>
       <button id="tab-questions">📝 Questions & Tests (<span id="questions-count">0</span>)</button>
+      <button id="tab-sessions">🟢 Logged In (<span id="sessions-count">0</span>)</button>
       <button id="tab-kicked">Kicked Students (<span id="kicked-count">0</span>)</button>
       <button id="tab-violations" style="color:var(--danger-text);">🚨 Security Escapes (<span id="violations-count">0</span>)</button>
     </div>
@@ -739,6 +740,30 @@
       </thead>
       <tbody id="kicked-tbody">
         <tr><td colspan="5" style="text-align:center; padding:32px;" class="muted">No students currently disqualified.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Logged-in students (one live login per account) -->
+  <section id="panel-sessions" class="panel table-wrap" hidden>
+    <div style="padding: 12px 18px; border-bottom: 1px solid var(--border); font-size: 13px;" class="muted">
+      Each account can be signed in on one computer at a time. A computer that stops checking in for 90 s frees the login automatically.
+      Use <b>Release</b> when a student has to move to another PC right away (this signs out the old one).
+    </div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th class="mono" style="width:160px;">Roll Number</th>
+          <th>Name</th>
+          <th style="width:120px;">Status</th>
+          <th style="width:130px;">Signed in</th>
+          <th style="width:130px;">Last seen</th>
+          <th class="mono" style="width:150px;">IP</th>
+          <th class="right" style="width:120px;">Action</th>
+        </tr>
+      </thead>
+      <tbody id="sessions-tbody">
+        <tr><td colspan="7" style="text-align:center; padding:32px;" class="muted">Nobody is signed in.</td></tr>
       </tbody>
     </table>
   </section>
@@ -900,6 +925,7 @@
   let kickedData = [];
   let violationsData = [];
   let totals = null;
+  let sessionsData = [];
   let lastLiveAnnouncement = null;
   let questionsData = [];
   let problemsList = [...PROBLEMS];
@@ -1055,6 +1081,7 @@
         contestState = data.contest;
         kickedData = data.kicked || [];
         totals = data.totals || null;
+        sessionsData = data.sessions || [];
         const newViolations = data.violations || [];
 
         // Check for freshly reported active violations to trigger sound chime & urgent toast
@@ -1074,6 +1101,7 @@
 
         updateStateUI();
         updateKickedUI();
+        updateSessionsUI();
         updateViolationsUI();
       }
       if (sbRes.status === 'fulfilled' && sbRes.value.ok) {
@@ -1119,7 +1147,9 @@
   }
 
   function updateStats() {
-    document.getElementById('stat-contestants').textContent = scoreboardData.length;
+    const activeSessions = sessionsData.filter(x => x.active).length;
+    document.getElementById('stat-contestants').textContent = sessionsData.length ? activeSessions : scoreboardData.length;
+    document.getElementById('sessions-count').textContent = activeSessions;
     document.getElementById('stat-subs').textContent = totals ? totals.submissions : submissionsData.length;
     const ac = totals ? totals.accepted : submissionsData.filter(s => s.verdict === 'AC').length;
     document.getElementById('stat-ac').textContent = ac;
@@ -1243,6 +1273,49 @@
     tbody.querySelectorAll('.btn-unkick').forEach(btn => {
       btn.addEventListener('click', () => unkickContestant(btn.dataset.roll));
     });
+  }
+
+  function updateSessionsUI() {
+    const tbody = document.getElementById('sessions-tbody');
+    if (!tbody) return;
+    const rows = sessionsData.filter(x =>
+      !searchTerm || String(x.name || '').toLowerCase().includes(searchTerm) || String(x.roll || '').toLowerCase().includes(searchTerm));
+    if (!rows.length) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:32px;" class="muted">${sessionsData.length ? 'No matching students.' : 'Nobody is signed in.'}</td></tr>`;
+      return;
+    }
+    const ago = ms => { const s = Math.max(0, Math.round((Date.now() - ms) / 1000)); return s < 60 ? `${s}s ago` : `${Math.round(s / 60)} min ago`; };
+    tbody.innerHTML = rows.map(x => `
+      <tr>
+        <td class="mono strong">${escapeHtml(x.roll)}</td>
+        <td class="strong">${escapeHtml(x.name || '—')}</td>
+        <td>${x.active ? '<span class="badge badge-ok">● Online</span>' : '<span class="badge">Away</span>'}</td>
+        <td class="num muted">${x.created_at ? new Date(Number(x.created_at)).toLocaleTimeString() : '—'}</td>
+        <td class="num muted">${x.last_seen ? ago(Number(x.last_seen)) : '—'}</td>
+        <td class="mono muted">${escapeHtml(x.ip || '—')}</td>
+        <td class="right">
+          <button class="btn-danger-sm btn-release" data-roll="${escapeHtml(x.roll)}" title="Sign this computer out so the student can log in elsewhere">Release</button>
+        </td>
+      </tr>
+    `).join('');
+    tbody.querySelectorAll('.btn-release').forEach(btn => {
+      btn.addEventListener('click', () => releaseSession(btn.dataset.roll));
+    });
+  }
+
+  async function releaseSession(roll) {
+    if (!confirm(`Release ${roll}'s login?\nThe computer they're on now will be signed out, and they can sign in on another one.`)) return;
+    try {
+      const res = await api('/api/admin/session/release', { method: 'POST', body: { roll } });
+      if (res.ok) {
+        toast(`Released ${roll} — they can sign in again`, 'ok');
+        loadAll();
+      } else {
+        toast(`Could not release ${roll} (HTTP ${res.status})`, 'bad');
+      }
+    } catch {
+      toast('Failed to release session', 'bad');
+    }
   }
 
   async function kickContestant(roll, name) {
@@ -1420,6 +1493,7 @@
     updateScoreboard();
     updateFeed();
     updateViolationsUI();
+    updateSessionsUI();
     updateQuestionsUI();
   });
 
@@ -1428,16 +1502,18 @@
   const tabFeed = document.getElementById('tab-feed');
   const tabQuestions = document.getElementById('tab-questions');
   const tabKicked = document.getElementById('tab-kicked');
+  const tabSessions = document.getElementById('tab-sessions');
   const tabViolations = document.getElementById('tab-violations');
   const panelQuestions = document.getElementById('panel-questions');
   const panelViolations = document.getElementById('panel-violations');
 
   function selectTab(activeTab, activePanel) {
-    [tabLb, tabFeed, tabQuestions, tabKicked, tabViolations].forEach(t => t?.classList.remove('active'));
+    [tabLb, tabFeed, tabQuestions, tabSessions, tabKicked, tabViolations].forEach(t => t?.classList.remove('active'));
     [
       document.getElementById('panel-leaderboard'),
       document.getElementById('panel-feed'),
       panelQuestions,
+      document.getElementById('panel-sessions'),
       document.getElementById('panel-kicked'),
       panelViolations
     ].forEach(p => p && (p.hidden = true));
@@ -1449,6 +1525,7 @@
   tabLb.addEventListener('click', () => selectTab(tabLb, document.getElementById('panel-leaderboard')));
   tabFeed.addEventListener('click', () => selectTab(tabFeed, document.getElementById('panel-feed')));
   tabQuestions.addEventListener('click', () => selectTab(tabQuestions, panelQuestions));
+  tabSessions.addEventListener('click', () => selectTab(tabSessions, document.getElementById('panel-sessions')));
   tabKicked.addEventListener('click', () => selectTab(tabKicked, document.getElementById('panel-kicked')));
   tabViolations.addEventListener('click', () => selectTab(tabViolations, panelViolations));
 

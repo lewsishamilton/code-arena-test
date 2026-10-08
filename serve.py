@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import shutil
 import signal
 import sqlite3
@@ -225,6 +226,20 @@ def init_db():
             );
         """)
         cur.execute("CREATE INDEX IF NOT EXISTS idx_violations_roll ON security_violations(roll);")
+
+        # One live login per student (see open_student_session)
+        cur.execute(f"""
+            CREATE TABLE IF NOT EXISTS student_sessions (
+                roll VARCHAR(64) PRIMARY KEY,
+                token VARCHAR(128) NOT NULL,
+                name VARCHAR(255),
+                created_at {bigint_type},
+                last_seen {bigint_type},
+                ip VARCHAR(64),
+                user_agent TEXT
+            );
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_token ON student_sessions(token);")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_violations_time ON security_violations(timestamp);")
 
         # Ensure default contest state exists
@@ -1386,6 +1401,73 @@ def verify_student_credentials(roll: str, password: str):
 
 
 # =============================================================================
+# STUDENT SESSIONS — one live login per account
+# =============================================================================
+
+# Browsers check in every 4 s via /api/contest/state. A login that hasn't been
+# seen for this long is treated as abandoned (PC crashed, browser closed), so the
+# student can sign in on another computer without waiting for an invigilator.
+SESSION_STALE_MS = 90_000
+SESSION_TOUCH_MS = 15_000   # write last_seen at most this often per session
+
+
+def open_student_session(roll, name="", ip="", user_agent=""):
+    """Start a session for `roll` and return its token, or None while another
+    computer still holds a live session for the same account."""
+    roll = str(roll).strip().upper()
+    now = int(time.time() * 1000)
+    with _lock:
+        row = db.query_row("SELECT last_seen FROM student_sessions WHERE roll = ?", (roll,))
+        if row and now - int(row[0] or 0) < SESSION_STALE_MS:
+            return None
+        token = secrets.token_urlsafe(32)
+        db.execute("""
+            INSERT INTO student_sessions (roll, token, name, created_at, last_seen, ip, user_agent)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (roll) DO UPDATE SET token = excluded.token, name = excluded.name,
+                created_at = excluded.created_at, last_seen = excluded.last_seen,
+                ip = excluded.ip, user_agent = excluded.user_agent
+        """, (roll, token, str(name)[:255], now, now, str(ip)[:64], str(user_agent)[:300]), commit=True)
+    return token
+
+
+def touch_student_session(token):
+    """Roll number for a live session token (refreshing its last-seen time), else None."""
+    token = str(token or "").strip()
+    if not token:
+        return None
+    now = int(time.time() * 1000)
+    with _lock:
+        row = db.query_row("SELECT roll, last_seen FROM student_sessions WHERE token = ?", (token,))
+        if not row:
+            return None
+        if now - int(row[1] or 0) > SESSION_TOUCH_MS:
+            db.execute("UPDATE student_sessions SET last_seen = ? WHERE token = ?", (now, token), commit=True)
+    return row[0]
+
+
+def close_student_session(token):
+    with _lock:
+        db.execute("DELETE FROM student_sessions WHERE token = ?", (str(token or ""),), commit=True)
+
+
+def release_student_session(roll):
+    roll = str(roll).strip().upper()
+    with _lock:
+        db.execute("DELETE FROM student_sessions WHERE roll = ?", (roll,), commit=True)
+    return {"ok": True, "released": roll}
+
+
+def get_student_sessions():
+    now = int(time.time() * 1000)
+    with _lock:
+        rows = db.query_dicts("SELECT roll, name, created_at, last_seen, ip FROM student_sessions ORDER BY roll")
+    for r in rows:
+        r["active"] = now - int(r.get("last_seen") or 0) < SESSION_STALE_MS
+    return rows
+
+
+# =============================================================================
 # HTTP REQUEST HANDLER
 # =============================================================================
 
@@ -1417,6 +1499,15 @@ class Handler(SimpleHTTPRequestHandler):
         if token == ADMIN_TOKEN or q_token == ADMIN_TOKEN:
             return True
         return False
+
+    def client_ip(self):
+        # Behind Cloudflare Tunnel every request arrives from localhost.
+        return (self.headers.get("CF-Connecting-IP") or self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+                or self.client_address[0])
+
+    def session_roll(self):
+        """Roll number of the signed-in student making this request, or None."""
+        return touch_student_session(self.headers.get("X-Session-Token"))
 
     def end_headers(self):
         path = getattr(self, "path", "").split("?")[0]
@@ -1465,10 +1556,13 @@ class Handler(SimpleHTTPRequestHandler):
 
         # Contest state for contestants and admin
         if req_path == "/api/contest/state":
-            from urllib.parse import parse_qs
-            query = self.path.split("?", 1)[1] if "?" in self.path else ""
-            roll = parse_qs(query).get("roll", [None])[0]
-            return self.json(HTTPStatus.OK, get_contest_state(roll))
+            # Doubles as the session heartbeat. Per-student details only for a valid session.
+            if not self.headers.get("X-Session-Token"):
+                return self.json(HTTPStatus.OK, get_contest_state())
+            roll = self.session_roll()
+            if not roll:
+                return self.json(HTTPStatus.OK, {**get_contest_state(), "sessionValid": False})
+            return self.json(HTTPStatus.OK, {**get_contest_state(roll), "sessionValid": True})
 
         # Scoreboard
         if req_path == "/api/scoreboard":
@@ -1484,6 +1578,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "contest": get_contest_state(),
                 "kicked": get_kicked_users(),
                 "violations": get_security_violations(),
+                "sessions": get_student_sessions(),
                 "totals": {"submissions": int(totals[0] or 0), "accepted": int(totals[1] or 0)}
             })
 
@@ -1571,7 +1666,16 @@ class Handler(SimpleHTTPRequestHandler):
             ok, err, user = verify_student_credentials(roll, password)
             if not ok:
                 return self.json(HTTPStatus.UNAUTHORIZED, {"ok": False, "error": err or "Invalid credentials"})
-            return self.json(HTTPStatus.OK, {"ok": True, "user": user})
+            token = open_student_session(user["roll"], user.get("name", ""), self.client_ip(), self.headers.get("User-Agent", ""))
+            if not token:
+                return self.json(HTTPStatus.CONFLICT, {"ok": False, "error":
+                    f"{user['roll']} is already signed in on another computer. Close the contest there first, "
+                    "or ask an invigilator to release your session."})
+            return self.json(HTTPStatus.OK, {"ok": True, "user": user, "token": token})
+
+        if req_path == "/api/auth/logout":
+            close_student_session(self.headers.get("X-Session-Token"))
+            return self.json(HTTPStatus.OK, {"ok": True})
 
         # Admin Login
         if req_path == "/api/admin/login":
@@ -1621,15 +1725,29 @@ class Handler(SimpleHTTPRequestHandler):
                 payload = json.loads(self.rfile.read(length))
             except Exception:
                 return self.json(HTTPStatus.BAD_REQUEST, {"error": "invalid JSON"})
-            roll = payload.get("roll")
-            name = payload.get("name", "")
-            event_type = payload.get("type", "window-blur")
-            detail = payload.get("detail", "Contest window unfocused")
-            ts = payload.get("timestamp")
+            # The roll comes from the session, so nobody can report a violation for someone else.
+            roll = self.session_roll()
             if not roll:
+                return self.json(HTTPStatus.UNAUTHORIZED, {"error": "Not signed in"})
+            name = str(payload.get("name", ""))[:120]
+            event_type = str(payload.get("type", "window-blur"))[:64]
+            detail = str(payload.get("detail", "Contest window unfocused"))[:300]
+            ts = payload.get("timestamp")
+            ts = int(ts) if isinstance(ts, (int, float)) else None
+            return self.json(HTTPStatus.OK, record_security_violation(roll, name, event_type, detail, ts, self.client_ip()))
+
+        # Admin: free a student's login so they can sign in on another computer
+        if req_path == "/api/admin/session/release":
+            if not self.is_admin():
+                return self.json(HTTPStatus.UNAUTHORIZED, {"error": "Admin password required"})
+            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                payload = json.loads(self.rfile.read(length))
+            except Exception:
+                return self.json(HTTPStatus.BAD_REQUEST, {"error": "invalid JSON"})
+            if not payload.get("roll"):
                 return self.json(HTTPStatus.BAD_REQUEST, {"error": "Missing roll number"})
-            ip = self.client_address[0]
-            return self.json(HTTPStatus.OK, record_security_violation(roll, name, event_type, detail, ts, ip))
+            return self.json(HTTPStatus.OK, release_student_session(payload["roll"]))
 
         # Admin Unblock Contestant
         if req_path == "/api/admin/unblock":
@@ -1721,6 +1839,8 @@ class Handler(SimpleHTTPRequestHandler):
 
         # Java Execution
         if req_path == "/api/judge/java":
+            if not self.session_roll():
+                return self.json(HTTPStatus.UNAUTHORIZED, {"error": "Not signed in"})
             length = int(self.headers.get("Content-Length") or 0)
             if not 0 < length <= MAX_JUDGE_BODY:
                 return self.json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "body too large"})
@@ -1742,13 +1862,19 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception:
             return self.json(HTTPStatus.BAD_REQUEST, {"error": "invalid submission"})
 
+        roll = self.session_roll()
+        if not roll:
+            return self.json(HTTPStatus.UNAUTHORIZED, {"error": "Not signed in"})
+        if str(sub.get("roll", "")).strip().upper() != roll:
+            return self.json(HTTPStatus.FORBIDDEN, {"error": "Submission is for a different roll number"})
+        sub["roll"] = roll
+
         # Check if contestant is kicked/disqualified
-        roll = str(sub.get("roll", "")).strip().upper()
         if db.query_row("SELECT reason FROM kicked_users WHERE roll = ?", (roll,)):
             return self.json(HTTPStatus.FORBIDDEN, {"error": "Contestant is disqualified"})
 
         sub["receivedAt"] = int(time.time() * 1000)
-        sub["ip"] = self.client_address[0]
+        sub["ip"] = self.client_ip()
         save_submission(sub)
         return self.json(HTTPStatus.CREATED, {"ok": True})
 

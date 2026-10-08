@@ -68,7 +68,7 @@ self.onmessage = async ({ data: msg }) => {
         try {
           const res = await fetch(apiUrl('/api/judge/java'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-Session-Token': msg.auth || '' },
             body: JSON.stringify({ action: 'compile', source: msg.source })
           });
           if (res.ok) {
@@ -103,7 +103,7 @@ self.onmessage = async ({ data: msg }) => {
         try {
           const res = await fetch(apiUrl('/api/judge/java'), {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-Session-Token': msg.auth || '' },
             body: JSON.stringify({
               action: 'run',
               artifactId: artifact.artifactId,
@@ -152,7 +152,7 @@ self.onmessage = async ({ data: msg }) => {
       if (serverRunner && artifact?.artifactId) {
         fetch(apiUrl('/api/judge/java'), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Session-Token': msg.auth || '' },
           body: JSON.stringify({ action: 'clean', artifactId: artifact.artifactId })
         }).catch(() => {});
       }

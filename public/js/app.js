@@ -4,7 +4,7 @@
    ========================================================================= */
 import { CONFIG } from './config.js';
 import { PROBLEMS, LANGUAGES, JSCPP_TEMPLATES } from './problems.js';
-import { judge, prewarm, engineFor, VERDICTS } from './judge.js';
+import { judge, prewarm, engineFor, VERDICTS, setAuthToken } from './judge.js';
 import { createEditor } from './editor.js';
 import { marked } from '../vendor/marked.esm.js';
 
@@ -40,6 +40,17 @@ const store = {
   set(key, value) { try { localStorage.setItem('ca.v1.' + key, JSON.stringify(value)); return true; } catch { return false; } },
   remove(key) { try { localStorage.removeItem('ca.v1.' + key); } catch { /* ignore */ } }
 };
+
+/** Every student request carries the session token handed out at login. */
+const authHeaders = (extra = {}) => ({ ...extra, 'X-Session-Token': A?.session?.token || store.get('session', null)?.token || '' });
+
+/** Sign out locally (server session already gone or being closed) and show the login screen with a note. */
+function endSession(notice) {
+  try { stashCode(); } catch { /* editor may not be mounted */ }
+  store.remove('session');
+  if (notice) store.set('login_notice', notice);
+  location.reload();
+}
 
 function toast(message, tone = 'ok') {
   const el = document.createElement('div');
@@ -116,26 +127,12 @@ async function boot() {
   $$('[data-brand]').forEach(el => { el.innerHTML = brandHTML(CONFIG.contestName); });
   hydrateIcons();
 
-  // Check URL parameters for seamless Firestore integration:
-  // e.g. https://your-domain/?roll=25R21A05K9&name=John+Doe
-  const params = new URLSearchParams(window.location.search);
-  const qRoll = params.get('roll') || params.get('id');
-  const qName = params.get('name') || params.get('student');
-
-  if (qRoll) {
-    const session = {
-      name: (qName || qRoll).trim(),
-      roll: qRoll.trim().toUpperCase(),
-      loginAt: Date.now()
-    };
-    store.set('session', session);
-    enterArena(session);
-    return;
-  }
-
+  // Students always sign in with their Firestore roll number + password; the
+  // server then issues a session token (one live login per account).
   const session = store.get('session', null);
-  if (session?.roll) enterArena(session);
-  else showLogin();
+  if (session?.roll && session.token) return enterArena(session);
+  if (session) store.remove('session');   // signed in before session tokens existed
+  showLogin();
 }
 
 /* =========================================================================
@@ -179,6 +176,9 @@ function showLogin() {
 
   fields.roll?.focus();
 
+  const notice = store.get('login_notice', null);
+  if (notice) { store.remove('login_notice'); showAlert(notice, true); }
+
   form.onsubmit = async e => {
     e.preventDefault();
     hideAlert();
@@ -212,6 +212,7 @@ function showLogin() {
         name: data.user?.name || roll,
         roll: data.user?.roll || roll,
         uid: data.user?.uid,
+        token: data.token,
         loginAt: Date.now()
       };
       store.set('session', session);
@@ -234,6 +235,7 @@ let A = null;   // arena runtime state, created once per session
 
 function enterArena(session) {
   show('screen-arena');
+  setAuthToken(session.token);
   const key = `state.${session.roll}`;
   const state = store.get(key, null) || { startedAt: Date.now(), code: {}, lang: CONFIG.defaultLanguage, problem: 0, subs: [] };
   state.lang = LANGUAGES[state.lang] ? state.lang : 'py';
@@ -464,7 +466,7 @@ function flushOutbox() {
     const outbox = store.get(key, []);
     while (outbox.length) {
       try {
-        const res = await fetch(CONFIG.api.submissions, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(outbox[0]) });
+        const res = await fetch(CONFIG.api.submissions, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(outbox[0]) });
         if (!res.ok && res.status !== 403) throw new Error(`HTTP ${res.status}`);   // 403 = disqualified; retrying won't help
         outbox.shift();
         store.set(key, outbox);
@@ -501,11 +503,9 @@ async function requestFullscreenSafely() {
   try {
     if (!document.fullscreenElement && !document.webkitFullscreenElement) {
       const docEl = document.documentElement;
-      if (docEl.requestFullscreen) {
-        await docEl.requestFullscreen();
-      } else if (docEl.webkitRequestFullscreen) {
-        await docEl.webkitRequestFullscreen();
-      }
+      const req = docEl.requestFullscreen?.() ?? docEl.webkitRequestFullscreen?.();
+      // Some browsers/kiosk shells never settle this promise; don't let it block sign-in.
+      await Promise.race([req, new Promise(r => setTimeout(r, 1500))]);
     }
   } catch (err) {
     // Browser may require an explicit click gesture if launched without interaction
@@ -603,7 +603,7 @@ async function flushPendingViolations() {
     try {
       await fetch('/api/security/violation', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify(v)
       });
     } catch {
@@ -652,7 +652,7 @@ async function handleLockdownViolation(violation) {
   try {
     const res = await fetch('/api/security/violation', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(payload)
     });
     const result = await res.json().catch(() => ({}));
@@ -755,11 +755,10 @@ async function pollScoreboard() {
   if (Date.now() - problemsFetchedAt > 10000) await refreshProblems();
   await flushOutbox();
   await flushPendingViolations();
-  const roll = A.session?.roll || '';
   try {
     const [sbRes, stRes] = await Promise.all([
       fetch(CONFIG.api.scoreboard, { cache: 'no-store' }),
-      fetch(`/api/contest/state?roll=${encodeURIComponent(roll)}`, { cache: 'no-store' })
+      fetch('/api/contest/state', { cache: 'no-store', headers: authHeaders() })
     ]);
     if (sbRes.ok) {
       A.scoreboard = await sbRes.json();
@@ -767,6 +766,9 @@ async function pollScoreboard() {
     }
     if (stRes.ok) {
       const state = await stRes.json();
+      if (state.sessionValid === false) {
+        return endSession('You were signed out: this account was signed in on another computer, or an invigilator released your session. Sign in again to continue — your code is saved on this computer.');
+      }
       handleContestState(state);
     }
     updateNetworkUI(true);
@@ -1258,9 +1260,8 @@ function wireArena() {
       confirm: 'End session', tone: 'danger'
     });
     if (!ok) return;
-    stashCode();
-    store.remove('session');
-    location.reload();
+    try { await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }); } catch { /* offline: the login expires on its own */ }
+    endSession();
   });
 
   wireResizers();

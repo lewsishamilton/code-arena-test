@@ -98,6 +98,11 @@ class WorkerHost {
   prewarm() { this.ready().catch(() => {}); }
 }
 
+/** Session token for engines that call our server (Java). Never sent to the Python/C workers,
+    where contestant code runs alongside the message data. */
+let authToken = '';
+export function setAuthToken(token) { authToken = token || ''; }
+
 const hosts = {};
 const host = (key, url, opts) => (hosts[key] ||= new WorkerHost(key, url, opts));
 
@@ -142,7 +147,7 @@ const ENGINES = {
     return {
       label: 'Java 21 (OpenJDK)', okText: 'Compiled successfully', hosts: [h],
       prepare: async source => {
-        const r = await h.call({ type: 'compile', source }, CONFIG.judge.compileTimeoutMs || 30000);
+        const r = await h.call({ type: 'compile', source, auth: authToken }, CONFIG.judge.compileTimeoutMs || 30000);
         if (r.timedOut) return { ok: false, log: 'Compilation timed out' };
         if (r.crashed) return { ok: false, log: `Runner crashed: ${r.message}` };
         return { ok: r.ok, log: r.log, artifact: r.artifact || source };
@@ -152,6 +157,7 @@ const ENGINES = {
         const javaLimit = Math.max(limit || 10000, 10000);
         return h.call({
           type: 'run',
+          auth: authToken,
           artifact,
           source: typeof artifact === 'object' ? artifact.source : artifact,
           input,
@@ -159,7 +165,7 @@ const ENGINES = {
           timeLimitMs: javaLimit
         }, javaLimit + 5000);
       },
-      clean: artifact => h.call({ type: 'clean', artifact }, 2000).catch(() => {})
+      clean: artifact => h.call({ type: 'clean', artifact, auth: authToken }, 2000).catch(() => {})
     };
   }
 };

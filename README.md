@@ -67,6 +67,12 @@ Contestants log in using their registered credentials created during registratio
 4. Activates **Fullscreen Exam Mode** and enters the Coding Arena!
 5. Unregistered students or incorrect passwords are automatically rejected with clear error messages.
 
+### One Login Per Account
+- A successful login gets a private session token; every submission, violation report and Java run must carry it, so nobody can submit or report violations under someone else's roll number.
+- An account can be signed in on **one computer at a time**. A second computer gets *"already signed in on another computer"*.
+- A computer that stops checking in for **90 seconds** (crashed, closed) frees the login automatically. To move a student to another PC immediately, use **Admin → 🟢 Logged In → Release**.
+- Reloading the page on the same computer keeps the student signed in. **End session** signs out and frees the login.
+
 ### Configuration (`firebase-config.json` & `serviceAccountKey.json`):
 Both files are already configured and connected to your live Firebase project `codearena-31947`:
 - **Web API Key:** `AIzaSyAS8NMWRcKyU-6WK791X5QXy7lV4QgcNgU`
