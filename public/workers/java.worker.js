@@ -109,7 +109,7 @@ self.onmessage = async ({ data: msg }) => {
               artifactId: artifact.artifactId,
               source: artifact.source,
               input: msg.input || '',
-              timeLimitMs: msg.timeLimitMs || 2000,
+              timeLimitMs: Math.max(msg.timeLimitMs || 10000, 10000),
               outputLimit: msg.outputLimit || (1 << 20)
             })
           });

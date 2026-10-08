@@ -986,13 +986,13 @@ def compile_java(source: str):
     return entry
 
 
-def run_java_test(build_info, input_text: str, time_limit_ms: int = 2000):
+def run_java_test(build_info, input_text: str, time_limit_ms: int = 10000):
     bdir = Path(build_info["dir"])
     if not bdir.exists():
         return {"ok": False, "verdict": "RE", "error": "Build cache expired"}
 
     main_class = build_info["mainClass"]
-    timeout_s = max(0.2, (time_limit_ms + 400) / 1000.0)
+    timeout_s = max(0.5, (time_limit_ms + 1000) / 1000.0)
 
     cmd = [
         "java",
@@ -1084,7 +1084,7 @@ def handle_java_judge(payload: dict):
             return {"status": "RE", "stdout": "", "stderr": "Source code not found for artifact", "timeMs": 0}
 
         inp = payload.get("input", "")
-        time_limit_ms = int(payload.get("timeLimitMs") or 2000)
+        time_limit_ms = max(int(payload.get("timeLimitMs") or 10000), 10000)
 
         if remote_url:
             try:
@@ -1098,7 +1098,7 @@ def handle_java_judge(payload: dict):
                     data=req_data,
                     headers={"Content-Type": "application/json", "User-Agent": "CodeArena-VM"}
                 )
-                with urllib.request.urlopen(req, timeout=max(5, (time_limit_ms / 1000.0) + 10)) as resp:
+                with urllib.request.urlopen(req, timeout=max(20, (time_limit_ms / 1000.0) + 10)) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     verdict = data.get("verdict", "RE")
                     time_ms = round(data.get("timeMs", 0))
@@ -1140,7 +1140,7 @@ def handle_java_judge(payload: dict):
     # 4. BATCH MODE (source + tests)
     # -------------------------------------------------------------
     tests = payload.get("tests", [])
-    time_limit_ms = int(payload.get("timeLimitMs") or 2000)
+    time_limit_ms = max(int(payload.get("timeLimitMs") or 10000), 10000)
 
     if remote_url:
         try:

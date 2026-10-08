@@ -147,14 +147,18 @@ const ENGINES = {
         if (r.crashed) return { ok: false, log: `Runner crashed: ${r.message}` };
         return { ok: r.ok, log: r.log, artifact: r.artifact || source };
       },
-      run: (artifact, input, limit) => h.call({
-        type: 'run',
-        artifact,
-        source: typeof artifact === 'object' ? artifact.source : artifact,
-        input,
-        outputLimit: CONFIG.judge.outputLimitBytes,
-        timeLimitMs: limit
-      }, limit + 2000),
+      run: (artifact, input, limit) => {
+        // Allow up to 10 seconds (10,000 ms) for Java execution before killing as infinite loop / TLE
+        const javaLimit = Math.max(limit || 10000, 10000);
+        return h.call({
+          type: 'run',
+          artifact,
+          source: typeof artifact === 'object' ? artifact.source : artifact,
+          input,
+          outputLimit: CONFIG.judge.outputLimitBytes,
+          timeLimitMs: javaLimit
+        }, javaLimit + 5000);
+      },
       clean: artifact => h.call({ type: 'clean', artifact }, 2000).catch(() => {})
     };
   }

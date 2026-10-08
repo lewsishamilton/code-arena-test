@@ -75,13 +75,13 @@ def compile_java(source: str):
     return entry
 
 
-def run_java_test(build_info, input_text: str, time_limit_ms: int = 2000):
+def run_java_test(build_info, input_text: str, time_limit_ms: int = 10000):
     bdir = Path(build_info["dir"])
     if not bdir.exists():
         return {"ok": False, "verdict": "RE", "error": "Build cache expired"}
 
     main_class = build_info["mainClass"]
-    timeout_s = max(0.2, (time_limit_ms + 400) / 1000.0)
+    timeout_s = max(0.5, (time_limit_ms + 1000) / 1000.0)
 
     cmd = [
         "java",
@@ -123,7 +123,7 @@ def run_java_test(build_info, input_text: str, time_limit_ms: int = 2000):
 def execute_judge(payload: dict):
     source = payload.get("source", "")
     tests = payload.get("tests", [])
-    time_limit_ms = int(payload.get("timeLimitMs") or 2000)
+    time_limit_ms = int(payload.get("timeLimitMs") or 10000)
 
     cres = compile_java(source)
     if not cres.get("ok"):
@@ -225,7 +225,7 @@ class JudgeHandler(BaseHTTPRequestHandler):
         if action == "run":
             source = payload.get("source", "")
             inp = payload.get("input", "")
-            limit = int(payload.get("timeLimitMs") or 2000)
+            limit = int(payload.get("timeLimitMs") or 10000)
             res = compile_java(source)
             if not res.get("ok"):
                 return self.send_json(HTTPStatus.OK, {"status": "CE", "stdout": "", "stderr": res.get("error", "Compilation failed"), "timeMs": 0})
