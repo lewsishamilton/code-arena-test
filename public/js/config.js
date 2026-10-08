@@ -59,7 +59,9 @@ export const CONFIG = {
 
   /** Heavy runtimes load from CDNs. Point these at a local mirror for an offline lab. */
   cdn: {
-    pyodide: 'https://cdn.jsdelivr.net/pyodide/v0.29.5/full/',
+    // Served by our own server: jsDelivr's copy of pyodide.asm.wasm can crawl at a few KB/s.
+    pyodide: '/vendor/pyodide/0.29.5/',
+    pyodideFallback: 'https://cdn.jsdelivr.net/pyodide/v0.29.5/full/',
     clang: 'https://cdn.jsdelivr.net/npm/@yowasp/clang@21.1.4-3/gen/bundle.js',
     monaco: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs'
   }

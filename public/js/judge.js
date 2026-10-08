@@ -22,7 +22,7 @@ export const VERDICTS = {
   IE: { label: 'Judge Error', short: 'IE', tone: 'neutral' }
 };
 
-const LOAD_TIMEOUT_MS = 180000;   // first-time runtime download on a slow lab network
+const LOAD_TIMEOUT_MS = 600000;   // first-time runtime download (~12 MB for Python) on a slow, shared lab network
 
 /* ---------- One worker, restartable ---------- */
 class WorkerHost {
@@ -39,7 +39,7 @@ class WorkerHost {
     const worker = new Worker(new URL(this.url, import.meta.url), this.module ? { type: 'module' } : undefined);
     this.worker = worker;
     this.readyPromise = new Promise((resolve, reject) => {
-      const timer = setTimeout(() => fail(`${this.name} runtime did not load within ${LOAD_TIMEOUT_MS / 1000} s`), LOAD_TIMEOUT_MS);
+      const timer = setTimeout(() => fail(`${this.name} runtime could not be downloaded within ${LOAD_TIMEOUT_MS / 60000} min. Check the internet connection and press Run again.`), LOAD_TIMEOUT_MS);
       const fail = message => { clearTimeout(timer); this.kill(); reject(new Error(message)); };
       worker.onerror = e => { e.preventDefault?.(); fail(e.message || `${this.name} worker failed to start`); };
       worker.onmessage = ({ data }) => {
@@ -189,10 +189,14 @@ let queue = Promise.resolve();
  * onEvent receives: queued · loading · loaded · compiling · compiled · test-start · test-done · done
  * Resolves the final { verdict, passed, total, timeMs, failedTest, log, results }.
  */
+let jobsInFlight = 0;
+
 export function judge({ lang, source, tests, timeLimitMs, mode, onEvent = () => {} }) {
-  onEvent({ type: 'queued' });
+  if (jobsInFlight > 0) onEvent({ type: 'queued' });   // only when actually waiting behind another job
+  jobsInFlight++;
   const job = queue.then(() => runJob({ lang, source, tests, timeLimitMs, mode, onEvent }));
   queue = job.catch(() => {});
+  job.finally(() => { jobsInFlight--; });
   return job;
 }
 
@@ -206,10 +210,16 @@ async function runJob({ lang, source, tests, timeLimitMs, mode, onEvent }) {
     // 1. Runtime warm-up (not timed)
     for (const h of engine.hosts) {
       if (h.isReady) continue;
-      onEvent({ type: 'loading', message: `Starting ${h.name} runtime…` });
-      h.onLoading = (message, done, total) => onEvent({ type: 'loading', message, done, total });
-      await h.ready();
-      h.onLoading = null;
+      // The first load downloads the whole runtime from the CDN, which can take minutes
+      // on a busy lab network. Tick an elapsed counter so it never looks frozen.
+      const t0 = Date.now();
+      let last = { message: `Downloading ${h.name} runtime (first run only)…` };
+      const show = () => onEvent({ type: 'loading', ...last, message: `${last.message} ${Math.round((Date.now() - t0) / 1000)} s` });
+      h.onLoading = (message, done, total) => { last = { message, done, total }; show(); };
+      show();
+      const ticker = setInterval(show, 1000);
+      try { await h.ready(); }
+      finally { clearInterval(ticker); h.onLoading = null; }
       onEvent({ type: 'loaded', name: h.name });
     }
 

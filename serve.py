@@ -1379,9 +1379,18 @@ class Handler(SimpleHTTPRequestHandler):
         return False
 
     def end_headers(self):
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-        self.send_header("Pragma", "no-cache")
-        self.send_header("Expires", "0")
+        path = getattr(self, "path", "").split("?")[0]
+        if path.startswith("/api/") or path.startswith("/data/"):
+            # Live data (questions, tests, state) must never come from a cache.
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        elif path.startswith("/vendor/pyodide/"):
+            # Versioned path, never changes: let browsers and Cloudflare keep it.
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        else:
+            # Static files: revalidate every time (cheap 304) instead of re-downloading.
+            self.send_header("Cache-Control", "no-cache")
         # Permissive CORS headers so external Firestore pages and API clients connect without issue
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD")

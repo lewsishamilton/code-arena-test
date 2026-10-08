@@ -77,15 +77,32 @@ def __judge(src, data, limit):
     return (status, bytes(out.buf).decode("utf-8", "replace"), stderr, elapsed)
 `;
 
+// Pyodide sometimes loses a failed download in an unawaited promise, so loadPyodide()
+// never settles. Report it instead of leaving the student staring at a spinner.
+let loading = false;
+self.addEventListener('unhandledrejection', e => {
+  if (!loading) return;
+  loading = false;
+  postMessage({ type: 'fatal', message: `Python runtime download failed (${e.reason?.message || e.reason}). Check the internet connection and press Run again.` });
+});
+
 self.onmessage = async ({ data: msg }) => {
   try {
     if (msg.type === 'init') {
-      postMessage({ type: 'loading', message: 'Loading Python runtime (Pyodide)…' });
-      importScripts(msg.cdn.pyodide + 'pyodide.js');
-      const py = await loadPyodide({ indexURL: msg.cdn.pyodide, stdout: () => {}, stderr: () => {} });
+      postMessage({ type: 'loading', message: 'Downloading Python runtime (~12 MB, first run only)…' });
+      loading = true;
+      // Local mirror first, CDN if the mirror is missing.
+      const bases = [msg.cdn.pyodide, msg.cdn.pyodideFallback].filter(Boolean).map(b => new URL(b, self.location.href).href);
+      let base = null;
+      for (const b of bases) {
+        try { importScripts(b + 'pyodide.js'); base = b; break; } catch { /* try the next one */ }
+      }
+      if (!base) throw new Error('Could not download the Python runtime');
+      const py = await loadPyodide({ indexURL: base, stdout: () => {}, stderr: () => {} });
       py.runPython(HARNESS);
       judge = py.globals.get('__judge');
       check = py.globals.get('__check');
+      loading = false;
       self.lockdown();
       postMessage({ type: 'ready' });
     } else if (msg.type === 'compile') {
@@ -99,7 +116,7 @@ self.onmessage = async ({ data: msg }) => {
     }
   } catch (e) {
     const message = String(e?.message || e);
-    if (msg.type === 'init') postMessage({ type: 'fatal', message });
+    if (msg.type === 'init') { loading = false; postMessage({ type: 'fatal', message }); }
     else postMessage({ type: msg.type === 'run' ? 'result' : 'compiled', id: msg.id, status: 'RE', ok: false, stdout: '', stderr: message, log: message, timeMs: 0 });
   }
 };
