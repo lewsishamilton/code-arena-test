@@ -903,6 +903,7 @@
   let problemsList = [...PROBLEMS];
   let editingQuestionId = null;
   let editingSamples = [];
+  let initialTestsRaw = '';
   let soundAlertEnabled = true;
   let lastSeenViolationId = 0;
   let searchTerm = '';
@@ -969,11 +970,16 @@
   async function api(path, opts = {}) {
     opts.headers = opts.headers || {};
     opts.headers['X-Admin-Token'] = token;
+    opts.cache = opts.cache || 'no-store';
     if (opts.body && typeof opts.body === 'object') {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(opts.body);
     }
-    const res = await fetch(path, opts);
+    const method = (opts.method || 'GET').toUpperCase();
+    const finalPath = method === 'GET'
+      ? `${path}${path.includes('?') ? '&' : '?'}_t=${Date.now()}`
+      : path;
+    const res = await fetch(finalPath, opts);
     if (res.status === 401) {
       sessionStorage.removeItem('admin_token');
       token = '';
@@ -1094,8 +1100,10 @@
     statusPill.textContent = contestState.status.toUpperCase();
     statusPill.className = `status-badge status-${contestState.status}`;
 
-    if (contestState.announcement) {
-      document.getElementById('announcement-input').value = contestState.announcement;
+    const annInput = document.getElementById('announcement-input');
+    // Don't clobber what the admin is typing on every 3s poll
+    if (contestState.announcement && document.activeElement !== annInput) {
+      annInput.value = contestState.announcement;
     }
     if (contestState.lockdownPolicy) {
       updateLockdownPolicyUI(contestState.lockdownPolicy);
@@ -1629,6 +1637,7 @@
           note: s.note || ''
         }));
         testsRaw.value = JSON.stringify(data.tests || [], null, 2);
+        initialTestsRaw = testsRaw.value;
       } catch (err) {
         toast('Error loading question details: ' + err.message, 'bad');
         return;
@@ -1658,6 +1667,7 @@
         { input: '', output: '', note: '' }
       ];
       testsRaw.value = '[\n  {\n    "input": "",\n    "output": ""\n  }\n]';
+      initialTestsRaw = '';
     }
 
     renderSamples();
@@ -1691,21 +1701,39 @@
       return;
     }
 
-    const parsedTests = validateTestsJson();
-    if (parsedTests === null) {
-      toast('Please fix JSON syntax errors in Hidden Test Cases', 'bad');
-      document.getElementById('qmodal-tests-raw').focus();
+    if (!editingQuestionId && questionsData.some(q => q.id === qid)) {
+      toast(`Problem ${qid} already exists — pick another ID or edit the existing one`, 'bad');
+      document.getElementById('qmodal-id').focus();
       return;
     }
 
-    // Prepare samples
-    const samples = editingSamples
-      .filter(s => s.input.trim() || s.output.trim())
-      .map(s => ({
-        input: s.input.endsWith('\n') ? s.input : s.input + '\n',
-        output: s.output.endsWith('\n') ? s.output : s.output + '\n',
-        ...(s.note ? { note: s.note.trim() } : {})
-      }));
+    let parsedTests = null;
+    const isNew = !editingQuestionId;
+    const testsWereEdited = isNew || (document.getElementById('qmodal-tests-raw').value.trim() !== initialTestsRaw.trim());
+
+    if (testsWereEdited) {
+      parsedTests = validateTestsJson();
+      if (parsedTests === null) {
+        toast('Please fix JSON syntax errors in Hidden Test Cases', 'bad');
+        document.getElementById('qmodal-tests-raw').focus();
+        return;
+      }
+    }
+
+    // Read samples directly from DOM cards to prevent desync
+    const samples = [];
+    document.querySelectorAll('#samples-container .sample-card').forEach(card => {
+      const inp = card.querySelector('.sample-input')?.value || '';
+      const out = card.querySelector('.sample-output')?.value || '';
+      const note = card.querySelector('.sample-note')?.value || '';
+      if (inp.trim() || out.trim()) {
+        samples.push({
+          input: inp.endsWith('\n') ? inp : inp + '\n',
+          output: out.endsWith('\n') ? out : out + '\n',
+          ...(note.trim() ? { note: note.trim() } : {})
+        });
+      }
+    });
 
     const payload = {
       question: {
@@ -1718,7 +1746,7 @@
         constraints,
         samples
       },
-      tests: parsedTests
+      tests: testsWereEdited ? parsedTests : null
     };
 
     const btnSave = document.getElementById('btn-save-question');
@@ -1734,6 +1762,20 @@
       if (res.ok) {
         toast(`Question ${qid} saved successfully!`, 'ok');
         document.getElementById('question-modal').close();
+
+        // Instantly update local questionsData and re-render without waiting
+        const savedQ = data.question || payload.question;
+        if (savedQ) {
+          const idx = questionsData.findIndex(q => String(q.id).toUpperCase() === String(savedQ.id).toUpperCase());
+          if (idx !== -1) {
+            questionsData[idx] = { ...questionsData[idx], ...savedQ };
+          } else {
+            questionsData.push(savedQ);
+          }
+          problemsList = questionsData.map(q => ({ id: q.id, title: q.title, points: q.points }));
+          refreshProblemHeaders();
+          updateQuestionsUI();
+        }
         loadAll();
       } else {
         toast(data.error || 'Failed to save question', 'bad');
@@ -1790,6 +1832,10 @@
   }
 
   // Modal event wiring
+  document.getElementById('qmodal-form')?.addEventListener('submit', e => {
+    e.preventDefault();
+    saveQuestion();
+  });
   document.getElementById('btn-add-question')?.addEventListener('click', () => openQuestionModal(null));
   document.getElementById('btn-close-qmodal')?.addEventListener('click', () => document.getElementById('question-modal').close());
   document.getElementById('btn-cancel-qmodal')?.addEventListener('click', () => document.getElementById('question-modal').close());

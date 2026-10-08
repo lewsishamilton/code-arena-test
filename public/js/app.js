@@ -72,7 +72,47 @@ function show(screen) {
 /* =========================================================================
    BOOT
    ========================================================================= */
+/* ---------- Live problem set ----------
+   problems.js is only the fallback baked in at page load. The admin panel edits
+   data/problems.json, so pull the live set from the server and patch PROBLEMS in place. */
+let problemsSig = JSON.stringify(PROBLEMS);
+let problemsFetchedAt = 0;
+
+async function refreshProblems() {
+  problemsFetchedAt = Date.now();
+  let fresh;
+  try {
+    const res = await fetch('/api/problems', { cache: 'no-store' });
+    if (!res.ok) return false;
+    fresh = (await res.json()).problems;
+  } catch { return false; }
+  if (!Array.isArray(fresh) || !fresh.length) return false;
+  const sig = JSON.stringify(fresh);
+  if (sig === problemsSig) return false;
+  problemsSig = sig;
+
+  const prevId = A ? problem()?.id : null;
+  if (A) stashCode();
+  PROBLEMS.splice(0, PROBLEMS.length, ...fresh.map(p => ({
+    ...p, constraints: p.constraints || [], samples: p.samples || [], statement: p.statement || ''
+  })));
+  if (!A) return true;
+
+  // Keep the contestant on the same problem even if the order changed.
+  const idx = PROBLEMS.findIndex(p => p.id === prevId);
+  A.state.problem = idx >= 0 ? idx : Math.min(A.state.problem, PROBLEMS.length - 1);
+  A.hidden = {};          // hidden tests may have changed too
+  A.save();
+  renderProblemTabs();
+  renderProblem();
+  renderStatus();
+  if (problem().id !== prevId) loadCode();
+  toast('Problem set updated by the organisers.', 'info');
+  return true;
+}
+
 async function boot() {
+  await refreshProblems();
   $$('[data-brand]').forEach(el => { el.innerHTML = brandHTML(CONFIG.contestName); });
   hydrateIcons();
 
@@ -686,6 +726,7 @@ function initLockdown() {
 }
 
 async function pollScoreboard() {
+  if (Date.now() - problemsFetchedAt > 10000) await refreshProblems();
   await flushOutbox();
   await flushPendingViolations();
   const roll = A.session?.roll || '';

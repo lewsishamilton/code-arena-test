@@ -559,6 +559,18 @@ PROBLEMS_JS_PATH = PUBLIC / "js" / "problems.js"
 TESTS_DIR = PUBLIC / "data" / "tests"
 
 
+def _write_json_atomic(path, data):
+    """Write JSON via a temp file + rename so readers never see a half-written file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+_questions_lock = threading.Lock()
+
+
 def sync_problems_js():
     """Generates public/js/problems.js from public/data/problems.json while preserving language templates."""
     if not PROBLEMS_JSON_PATH.exists():
@@ -783,22 +795,20 @@ def save_question_admin(q_data, tests_data=None):
             "samples": samples
         }
 
-        # Load existing questions
-        data = []
-        if PROBLEMS_JSON_PATH.exists():
-            with open(PROBLEMS_JSON_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
+        with _questions_lock:
+            # Load existing questions
+            data = []
+            if PROBLEMS_JSON_PATH.exists():
+                with open(PROBLEMS_JSON_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
 
-        idx = next((i for i, q in enumerate(data) if str(q.get("id")).strip().upper() == qid), -1)
-        if idx != -1:
-            data[idx] = new_q
-        else:
-            data.append(new_q)
+            idx = next((i for i, q in enumerate(data) if str(q.get("id")).strip().upper() == qid), -1)
+            if idx != -1:
+                data[idx] = new_q
+            else:
+                data.append(new_q)
 
-        # Write problems.json
-        PROBLEMS_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(PROBLEMS_JSON_PATH, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+            _write_json_atomic(PROBLEMS_JSON_PATH, data)
 
         # Save hidden tests if provided
         if tests_data is not None:
@@ -814,9 +824,7 @@ def save_question_admin(q_data, tests_data=None):
                         if t_out and not t_out.endswith("\n"):
                             t_out += "\n"
                         formatted_tests.append({"input": t_in, "output": t_out})
-            test_file = TESTS_DIR / f"{qid}.json"
-            with open(test_file, "w", encoding="utf-8") as tf:
-                json.dump(formatted_tests, tf, indent=2, ensure_ascii=False)
+            _write_json_atomic(TESTS_DIR / f"{qid}.json", formatted_tests)
 
         sync_problems_js()
         return True, new_q
@@ -838,8 +846,7 @@ def delete_question_admin(qid):
         if len(new_data) == len(data):
             return False, f"Question '{qid}' not found"
 
-        with open(PROBLEMS_JSON_PATH, "w", encoding="utf-8") as f:
-            json.dump(new_data, f, indent=2, ensure_ascii=False)
+        _write_json_atomic(PROBLEMS_JSON_PATH, new_data)
 
         test_file = TESTS_DIR / f"{qid}.json"
         if test_file.exists():
@@ -1372,7 +1379,9 @@ class Handler(SimpleHTTPRequestHandler):
         return False
 
     def end_headers(self):
-        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
         # Permissive CORS headers so external Firestore pages and API clients connect without issue
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD")
@@ -1394,6 +1403,16 @@ class Handler(SimpleHTTPRequestHandler):
     # ---------- Routes ----------
     def do_GET(self):
         req_path = self.path.split("?")[0]
+
+        # Public Problems endpoint for contestants and arena
+        if req_path in ("/api/problems", "/api/contest/problems"):
+            if PROBLEMS_JSON_PATH.exists():
+                try:
+                    with open(PROBLEMS_JSON_PATH, "r", encoding="utf-8") as f:
+                        return self.json(HTTPStatus.OK, {"problems": json.load(f)})
+                except Exception as e:
+                    return self.json(HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(e)})
+            return self.json(HTTPStatus.OK, {"problems": []})
 
         # Contest state for contestants and admin
         if req_path == "/api/contest/state":
@@ -1580,8 +1599,8 @@ class Handler(SimpleHTTPRequestHandler):
                 payload = json.loads(self.rfile.read(length))
             except Exception:
                 return self.json(HTTPStatus.BAD_REQUEST, {"error": "invalid JSON"})
-            msg = payload.get("announcement", "")
-            return self.json(HTTPStatus.OK, set_announcement(msg))
+            msg = payload.get("announcement", payload.get("message", ""))
+            return self.json(HTTPStatus.OK, set_announcement(str(msg or "").strip()))
 
         # Admin Update Lockdown Policy
         if req_path == "/api/admin/lockdown/policy":

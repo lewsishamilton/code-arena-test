@@ -5,8 +5,22 @@ set -e
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
 
+# Questions edited from the admin panel live in tracked files. Keep the server's
+# copies so `git pull` neither aborts on local changes nor wipes the edits.
+QDATA="public/data/problems.json public/data/tests public/js/problems.js"
+BACKUP="$(mktemp -d)"
+tar -cf "$BACKUP/questions.tar" $QDATA 2>/dev/null || true
+git checkout -- $QDATA 2>/dev/null || true
+
 echo "📥 Pulling latest updates from GitHub..."
-git pull
+if ! git pull; then
+    tar -xf "$BACKUP/questions.tar"
+    echo "❌ git pull failed — question data restored, server not restarted."
+    exit 1
+fi
+tar -xf "$BACKUP/questions.tar"
+rm -rf "$BACKUP"
+echo "📝 Admin-edited questions preserved."
 
 echo "🔄 Reloading CodeArena..."
 if systemctl is-active --quiet codearena 2>/dev/null; then
