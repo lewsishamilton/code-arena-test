@@ -103,11 +103,11 @@ async function refreshProblems() {
   problemsSig = sig;
 
   const prevId = A ? problem()?.id : null;
-  if (A) stashCode();
+  if (A?.opened) stashCode();
   PROBLEMS.splice(0, PROBLEMS.length, ...fresh.map(p => ({
     ...p, constraints: p.constraints || [], samples: p.samples || [], statement: p.statement || ''
   })));
-  if (!A) return true;
+  if (!A?.opened) return true;
 
   // Keep the contestant on the same problem even if the order changed.
   const idx = PROBLEMS.findIndex(p => p.id === prevId);
@@ -143,7 +143,7 @@ const ROLL_RE = /^[A-Za-z0-9][A-Za-z0-9-]{1,23}$/;
 function showLogin() {
   show('screen-login');
   $('#login-round').textContent = `${CONFIG.contestName} ${CONFIG.edition} · ${CONFIG.roundName}`;
-  $('#login-meta').textContent = `${PROBLEMS.length} problems · ${CONFIG.contestEnd ? 'ends ' + new Date(CONFIG.contestEnd).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : CONFIG.durationMin + ' min'} · Connected to Firestore`;
+  $('#login-meta').textContent = `${PROBLEMS.length ? PROBLEMS.length + ' problems · ' : ''}${CONFIG.contestEnd ? 'ends ' + new Date(CONFIG.contestEnd).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : CONFIG.durationMin + ' min'} · Connected to Firestore`;
 
   const form = $('#login-form');
   const fields = { roll: $('#f-roll'), password: $('#f-password') };
@@ -239,7 +239,7 @@ function enterArena(session) {
   const key = `state.${session.roll}`;
   const state = store.get(key, null) || { startedAt: Date.now(), code: {}, lang: CONFIG.defaultLanguage, problem: 0, subs: [] };
   state.lang = LANGUAGES[state.lang] ? state.lang : 'py';
-  state.problem = Math.min(state.problem || 0, PROBLEMS.length - 1);
+  state.problem = Math.max(0, Math.min(state.problem || 0, PROBLEMS.length - 1));
   // A reload in the middle of judging leaves a "Judging…" row that would never finish.
   for (const s of state.subs || []) if (s.verdict === 'PENDING') { s.verdict = 'NJ'; s.passed = 0; }
 
@@ -259,12 +259,12 @@ function enterArena(session) {
   $('#lang').innerHTML = Object.entries(LANGUAGES).map(([k, l]) => `<option value="${k}">${esc(l.label)}</option>`).join('');
   $('#lang').value = state.lang;
 
-  renderProblemTabs();
-  renderProblem();
   renderStatus();
   updateLangUI();
   wireArena();
-  mountEditor();
+  // Questions arrive only while the exam is running (the server refuses them otherwise).
+  if (PROBLEMS.length) openArena();
+  else setGate('connecting');
   tick(); setInterval(tick, 1000);
   setupNetworkMonitor();
   setupFullscreenMonitor();
@@ -274,7 +274,79 @@ function enterArena(session) {
   updateFullscreenUI();
   initLockdown();
   pollScoreboard();
-  prewarm(state.lang);
+}
+
+/* ---------- Exam gate: no questions on screen unless the exam is running ---------- */
+function openArena() {
+  A.opened = true;
+  A.state.problem = Math.max(0, Math.min(A.state.problem || 0, PROBLEMS.length - 1));
+  renderProblemTabs();
+  renderProblem();
+  renderStatus();
+  mountEditor();
+  prewarm(A.state.lang);
+  setGate(null);
+}
+
+let opening = null;
+async function ensureArenaOpen() {
+  if (A.opened) return setGate(null);
+  opening ||= (async () => {
+    if (!PROBLEMS.length) await refreshProblems();
+    if (PROBLEMS.length && !A.opened) openArena();
+    else if (!A.opened) setGate(A.gate === 'offline' ? 'offline' : 'connecting');   // retried on the next poll
+  })().finally(() => { opening = null; });
+  await opening;
+}
+
+const GATES = {
+  connecting: { icon: '<span class="spinner"></span>', title: 'Checking exam status…', text: 'Connecting to the exam server.' },
+  offline: { icon: '⚠', title: 'Can’t reach the exam server', text: 'Check the network cable or Wi-Fi. This page keeps retrying on its own.' },
+  waiting: { icon: '⏳', title: 'The exam hasn’t started yet', text: 'You’re signed in. The questions will appear here automatically when the invigilator starts the exam. There’s no need to refresh.' },
+  paused: { icon: '⏸', title: 'Exam paused', text: 'The invigilator has paused the exam and the clock is stopped. Your code is saved; the questions come back as soon as the exam resumes.' },
+  ended: { icon: '✓', title: 'The exam has ended', text: 'Time is up and running or submitting is closed. Your submitted results have been recorded.' }
+};
+
+function gateExtra(kind) {
+  const who = `<p class="gate-note">Signed in as <b>${esc(A.session.name)}</b> · <span class="mono">${esc(A.session.roll)}</span></p>`;
+  if (kind === 'waiting') {
+    const mins = (A.lastState?.durationMin || 0) + (A.lastState?.extraTimeMin || 0);
+    return `${mins ? `<p class="gate-note">Exam duration: <b>${mins} minutes</b></p>` : ''}${who}`;
+  }
+  if (kind === 'ended') {
+    const board = A.scoreboard?.rows || [];
+    const me = board.find(r => r.roll === A.session.roll);
+    const local = standing(A.state.subs);
+    const score = me ? me.score : local.score;
+    const solved = me ? me.solved : local.solved;
+    const rank = me ? `${me.rank}<small class="muted"> / ${board.length}</small>` : '—';
+    return `<div class="gate-stats">
+        <div><strong>${score}</strong><span>Score</span></div>
+        <div><strong>${solved}</strong><span>Solved</span></div>
+        <div><strong>${rank}</strong><span>Rank</span></div>
+      </div>${who}`;
+  }
+  return kind === 'paused' ? who : '';
+}
+
+/** Show the waiting/paused/ended screen (kind) instead of the arena, or the arena (null). */
+function setGate(kind) {
+  const showArena = !kind && A.opened;
+  if (showArena && A.gate) A.enteredAt = Date.now();   // focus-settling grace for lockdown checks
+  A.gate = showArena ? null : (kind || 'connecting');
+  $('#arena').hidden = !showArena;
+  $('#panel-tabs').hidden = !showArena;
+  $('#gate').hidden = showArena;
+  if (showArena) return;
+  const g = GATES[A.gate];
+  const html = `${A.gate}|${g.title}|${gateExtra(A.gate)}`;
+  if (html === A.gateHTML) return;                       // don't restart the animation every poll
+  A.gateHTML = html;
+  $('#gate').className = `gate ${A.gate}`;
+  $('#gate-icon').innerHTML = g.icon;
+  $('#gate-title').textContent = g.title;
+  $('#gate-text').textContent = g.text;
+  $('#gate-extra').innerHTML = gateExtra(A.gate);
 }
 
 const problem = () => PROBLEMS[A.state.problem];
@@ -692,6 +764,8 @@ function initLockdown() {
       // Only monitor active contestants currently inside the arena
       if (!A?.session || !$('#screen-arena') || $('#screen-arena').hidden) return;
       if (A.lockdownViolated || A.kicked || A.ended) return;
+      // Waiting room / paused / ended: no questions on screen, nothing to protect.
+      if (!A.opened || A.gate) return;
 
       // Grace period: allow 3s after entering arena for initial layout and focus settling
       if (A.enteredAt && Date.now() - A.enteredAt < 3000) return;
@@ -752,7 +826,8 @@ function initLockdown() {
 }
 
 async function pollScoreboard() {
-  if (Date.now() - problemsFetchedAt > 10000) await refreshProblems();
+  // Live question edits; before the exam opens, ensureArenaOpen() fetches them on Start.
+  if (A.opened && Date.now() - problemsFetchedAt > 10000) await refreshProblems();
   await flushOutbox();
   await flushPendingViolations();
   try {
@@ -774,6 +849,7 @@ async function pollScoreboard() {
     updateNetworkUI(true);
   } catch (e) {
     A.scoreboardError = e;
+    if (A.gate === 'connecting') setGate('offline');
     // CRITICAL: Network drops do NOT trigger security violations or block the student!
     updateNetworkUI(false);
   }
@@ -854,6 +930,7 @@ function handleContestState(state) {
   // 5. Timer synchronization & Contest End Time
   if (state.now) A.skew = state.now - Date.now();   // lab PCs' clocks are often minutes off
   A.serverStatus = state.status;
+  A.lastState = state;
   if (state.startTime) A.contestStart = state.startTime;
   if (state.endTime) {
     if (A.serverEndTime && state.endTime > A.serverEndTime) {
@@ -874,6 +951,7 @@ function handleContestState(state) {
     A.ended = false;
     A.editor?.setReadOnly(true);
     setButtons();
+    setGate('paused');
     return;
   } else if (state.status === 'waiting') {
     A.waiting = true;
@@ -881,6 +959,7 @@ function handleContestState(state) {
     A.ended = false;
     A.editor?.setReadOnly(true);
     setButtons();
+    setGate('waiting');
     return;
   } else if (state.status === 'ended' || (A.deadline && !timeRemaining)) {
     A.paused = false;
@@ -888,8 +967,10 @@ function handleContestState(state) {
     A.ended = true;
     A.editor?.setReadOnly(true);
     setButtons();
+    setGate('ended');
     return;
   } else {
+    ensureArenaOpen();
     // Contest is live & running!
     const needsRestore = A.paused || A.waiting || A.ended || wasBlocked;
     A.paused = false;
@@ -946,6 +1027,7 @@ function tick() {
       A.ended = true;
       A.editor?.setReadOnly(true);
       setButtons();
+      setGate('ended');
       toast('Time is up. Your code is saved; running and submitting are now closed.', 'warn');
     }
   } else {
@@ -955,6 +1037,7 @@ function tick() {
       A.ended = false;
       A.editor?.setReadOnly(false);
       setButtons();
+      ensureArenaOpen();
     }
   }
 }
@@ -1104,7 +1187,7 @@ function startJob(title) {
   log(`<span class="hl">${esc(title)}</span>`);
 }
 
-const canJudge = () => !(A.busy || A.ended || A.paused || A.waiting || A.kicked || A.lockdownViolated);
+const canJudge = () => A.opened && !A.gate && !(A.busy || A.ended || A.paused || A.waiting || A.kicked || A.lockdownViolated);
 
 async function runSamples() {
   if (!canJudge()) return;

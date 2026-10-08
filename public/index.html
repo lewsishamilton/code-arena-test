@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300..700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23202520'/%3E%3Ctext x='16' y='21' font-family='monospace' font-size='14' font-weight='700' fill='%232ab406' text-anchor='middle'%3E//%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="css/app.css">
-  <script type="module" src="js/app.js?v=2.4.0"></script>
+  <script type="module" src="js/app.js?v=2.5.0"></script>
 </head>
 <body>
 
@@ -90,13 +90,23 @@
     <button class="btn btn-primary btn-sm" id="btn-banner-fullscreen">Go Fullscreen</button>
   </div>
 
-  <nav class="arena-mobile-tabs seg" aria-label="Arena panels" id="panel-tabs">
+  <!-- Shown instead of the questions whenever the exam isn't running -->
+  <section class="gate" id="gate" aria-live="polite">
+    <div class="gate-card">
+      <div class="gate-icon" id="gate-icon"><span class="spinner"></span></div>
+      <h1 class="gate-title" id="gate-title">Checking exam status…</h1>
+      <p class="gate-text" id="gate-text">Connecting to the exam server.</p>
+      <div class="gate-extra" id="gate-extra"></div>
+    </div>
+  </section>
+
+  <nav class="arena-mobile-tabs seg" aria-label="Arena panels" id="panel-tabs" hidden>
     <button class="active" data-panel="problem">Problem</button>
     <button data-panel="code">Code</button>
     <button data-panel="output">Output</button>
   </nav>
 
-  <main class="arena" id="arena" data-panel="problem">
+  <main class="arena" id="arena" data-panel="problem" hidden>
     <!-- LEFT: problem + status -->
     <section class="arena-left" aria-label="Problem">
       <div class="q-tabs" role="tablist" id="q-tabs"></div>

@@ -249,7 +249,7 @@ def init_db():
         now_ms = int(time.time() * 1000)
         dur = 120
         defaults = {
-            "status": "running",
+            "status": "waiting",   # students see a waiting room until the admin presses Start
             "start_time": str(now_ms),
             "duration_min": str(dur),
             "extra_time_min": "0",
@@ -339,7 +339,14 @@ def get_contest_state(roll=None):
     if status == "running" and end_time > 0 and now_ms >= end_time:
         status = "ended"
 
-    time_left = max(0, end_time - now_ms) if status == "running" else (paused_left if status == "paused" else 0)
+    if status == "running":
+        time_left = max(0, end_time - now_ms)
+    elif status == "paused":
+        time_left = paused_left
+    elif status == "waiting":
+        time_left = (duration_min + extra_time_min) * 60000
+    else:
+        time_left = 0
 
     res = {
         "status": status,
@@ -389,6 +396,12 @@ def update_contest_timer(action, minutes=0):
                 status = "running"
                 end_time = now_ms + paused_left
                 paused_left = 0
+            elif status == "waiting":
+                # "Start / Resume" on a not-started exam starts the clock now.
+                status = "running"
+                start_time = now_ms
+                end_time = now_ms + (duration_min + extra_time_min) * 60000
+                paused_left = 0
         elif action == "add_time":
             added_ms = int(minutes) * 60000
             extra_time_min += int(minutes)
@@ -406,7 +419,7 @@ def update_contest_timer(action, minutes=0):
             start_time = now_ms
             end_time = now_ms + duration_min * 60000
             paused_left = 0
-            status = "running"
+            status = "waiting"   # questions stay hidden until the admin presses Start
             # Automatically unblock all disqualified contestants when timer/test is reset
             db.execute("DELETE FROM kicked_users;", commit=True)
             db.execute("UPDATE security_violations SET status = 'unblocked' WHERE status = 'active';", commit=True)
@@ -644,7 +657,9 @@ def sync_problems_js():
    Generated dynamically by CODE//ARENA Admin Panel.
    ========================================================================= */
 
-export const PROBLEMS = {json.dumps(problems_data, indent=2)};
+// Questions are NOT shipped in this public file: the arena loads them from
+// /api/problems, which only answers while the exam is running.
+export const PROBLEMS = [];
 
 /** Starter code. Every template reads stdin and writes stdout. */
 export const LANGUAGES = {{
@@ -717,6 +732,10 @@ int main() {{
 }};
 """
     PROBLEMS_JS_PATH.write_text(js_content, encoding="utf-8")
+
+
+def contest_running():
+    return get_contest_state().get("status") == "running"
 
 
 def load_problems():
@@ -1503,6 +1522,22 @@ class Handler(SimpleHTTPRequestHandler):
             return True
         return False
 
+    def send_head(self):
+        # Static files under public/data (problems.json, hidden tests) are question data.
+        # problems.json is never served directly; hidden tests only while the exam runs
+        # (the browser needs them to judge a submission). Admins always get through.
+        try:
+            target = Path(self.translate_path(self.path)).resolve()
+            data_dir = (PUBLIC / "data").resolve()
+            if (target == data_dir or data_dir in target.parents) and not self.is_admin():
+                if target == PROBLEMS_JSON_PATH.resolve() or target == data_dir or not contest_running():
+                    self.send_error(HTTPStatus.FORBIDDEN, "Questions are only available while the exam is running")
+                    return None
+        except Exception:
+            self.send_error(HTTPStatus.FORBIDDEN)
+            return None
+        return super().send_head()
+
     def client_ip(self):
         # Behind Cloudflare Tunnel every request arrives from localhost.
         return (self.headers.get("CF-Connecting-IP") or self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
@@ -1549,6 +1584,8 @@ class Handler(SimpleHTTPRequestHandler):
 
         # Public Problems endpoint for contestants and arena
         if req_path in ("/api/problems", "/api/contest/problems"):
+            if not contest_running() and not self.is_admin():
+                return self.json(HTTPStatus.FORBIDDEN, {"error": "The exam is not running", "problems": []})
             if PROBLEMS_JSON_PATH.exists():
                 try:
                     with open(PROBLEMS_JSON_PATH, "r", encoding="utf-8") as f:
@@ -1904,6 +1941,7 @@ def main():
         shutil.rmtree(JAVA_BUILDS, ignore_errors=True)
     JAVA_BUILDS.mkdir(parents=True, exist_ok=True)
 
+    sync_problems_js()
     problems = load_problems()
     ThreadingHTTPServer.allow_reuse_address = True
     server = ThreadingHTTPServer((args.host, args.port), partial(Handler, problems=problems))
