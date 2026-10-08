@@ -94,8 +94,11 @@ class DBManager:
     def get_connection(self):
         if self.is_postgres:
             return self._pool.getconn()
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10.0)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
         return conn
 
     def release_connection(self, conn):
