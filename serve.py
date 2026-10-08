@@ -387,6 +387,9 @@ def update_contest_timer(action, minutes=0):
             end_time = now_ms + duration_min * 60000
             paused_left = 0
             status = "running"
+            # Automatically unblock all disqualified contestants when timer/test is reset
+            db.execute("DELETE FROM kicked_users;", commit=True)
+            db.execute("UPDATE security_violations SET status = 'unblocked' WHERE status = 'active';", commit=True)
 
         updates = {
             "status": status,

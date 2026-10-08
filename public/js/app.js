@@ -202,9 +202,10 @@ function enterArena(session) {
   A = {
     session, state, editor: null, busy: false, ended: false,
     enteredAt: Date.now(),
+    unblockedAt: 0,
     hidden: {},                                   // problem id → hidden tests (fetched on first submit)
     save: () => store.set(key, state),
-    deadline: CONFIG.contestEnd ? Date.parse(CONFIG.contestEnd) : state.startedAt + CONFIG.durationMin * 60000,
+    deadline: CONFIG.contestEnd ? Date.parse(CONFIG.contestEnd) : null,
     scoreboard: null, scoreboardError: null
   };
   A.save();
@@ -624,10 +625,13 @@ function initLockdown() {
     triggerBrowserViolation = (type, detail) => {
       // Only monitor active contestants currently inside the arena
       if (!A?.session || !$('#screen-arena') || $('#screen-arena').hidden) return;
-      if (A.lockdownViolated || A.kicked) return;
+      if (A.lockdownViolated || A.kicked || A.ended) return;
 
-      // Grace period: allow 2.5s after entering arena for initial layout and focus settling
-      if (A.enteredAt && Date.now() - A.enteredAt < 2500) return;
+      // Grace period: allow 3s after entering arena for initial layout and focus settling
+      if (A.enteredAt && Date.now() - A.enteredAt < 3000) return;
+
+      // Grace period: allow 8s after unblocking for contestant to re-focus window and re-enter fullscreen
+      if (A.unblockedAt && Date.now() - A.unblockedAt < 8000) return;
 
       // Check dynamic live lockdown policy from admin
       const pol = A.lockdownPolicy || { blockBlur: true, blockTab: true, blockDevtools: true, blockFullscreen: false };
@@ -713,6 +717,7 @@ function handleContestState(state) {
     A.lockdownPolicy = state.lockdownPolicy;
   }
 
+  // 1. Contestant is currently Kicked / Disqualified
   if (state.isKicked) {
     if (!A.kicked) {
       A.kicked = true;
@@ -737,45 +742,24 @@ function handleContestState(state) {
     return;
   }
 
-  // Check if student was previously locked/kicked, but admin unblocked/pardoned them!
-  if (!state.isKicked && (A.kicked || A.lockdownViolated)) {
+  // 2. Unblock / Pardon: contestant was previously blocked, but admin unblocked/pardoned them!
+  const wasBlocked = A.kicked || A.lockdownViolated;
+  if (!state.isKicked && wasBlocked) {
     A.kicked = false;
     A.lockdownViolated = false;
-    A.ended = false;
-    A.editor?.setReadOnly(false);
-    setButtons();
+    A.unblockedAt = Date.now();
     hideLockdownViolationUI();
+    $('#modal')?.close?.();
     toast('🎉 Exam access restored by administrator!', 'ok');
   }
 
-  // Handle announcements
+  // 3. Announcements
   if (state.announcement && state.announcement !== A.lastAnnouncement) {
     A.lastAnnouncement = state.announcement;
     toast(`📢 Announcement: ${state.announcement}`, 'info');
   }
 
-  // Handle status
-  if (state.status === 'paused') {
-    A.paused = true;
-    A.editor?.setReadOnly(true);
-    setButtons();
-    return;
-  } else if (state.status === 'waiting') {
-    A.waiting = true;
-    A.editor?.setReadOnly(true);
-    setButtons();
-    return;
-  } else {
-    if (A.paused || A.waiting) {
-      A.paused = false;
-      A.waiting = false;
-      A.editor?.setReadOnly(A.ended);
-      setButtons();
-      toast('Contest is now live!', 'ok');
-    }
-  }
-
-  // Handle timer sync & extra time
+  // 4. Timer synchronization & Contest End Time
   if (state.endTime) {
     if (A.serverEndTime && state.endTime > A.serverEndTime) {
       const extraMin = Math.round((state.endTime - A.serverEndTime) / 60000);
@@ -783,6 +767,52 @@ function handleContestState(state) {
     }
     A.serverEndTime = state.endTime;
     A.deadline = state.endTime;
+  }
+
+  // 5. Contest Lifecycle State: paused, waiting, ended, or active running!
+  const now = Date.now();
+  const timeRemaining = !!(A.deadline && A.deadline > now);
+
+  if (state.status === 'paused') {
+    A.paused = true;
+    A.waiting = false;
+    A.ended = false;
+    A.editor?.setReadOnly(true);
+    setButtons();
+    return;
+  } else if (state.status === 'waiting') {
+    A.waiting = true;
+    A.paused = false;
+    A.ended = false;
+    A.editor?.setReadOnly(true);
+    setButtons();
+    return;
+  } else if (state.status === 'ended' || (A.deadline && !timeRemaining)) {
+    A.paused = false;
+    A.waiting = false;
+    A.ended = true;
+    A.editor?.setReadOnly(true);
+    setButtons();
+    return;
+  } else {
+    // Contest is live & running!
+    const needsRestore = A.paused || A.waiting || A.ended || wasBlocked;
+    A.paused = false;
+    A.waiting = false;
+    A.ended = false;
+    A.busy = false;
+
+    if (needsRestore) {
+      A.editor?.setReadOnly(false);
+      setButtons();
+      window.focus();
+      A.editor?.focus();
+      if (!wasBlocked && state.status === 'running') {
+        toast('Contest is live and active!', 'ok');
+      }
+    } else {
+      setButtons();
+    }
   }
 }
 
@@ -806,15 +836,30 @@ function tick() {
     $('#timer').querySelector('small').textContent = 'Starting soon';
     return;
   }
+  if (!A.deadline) {
+    $('#timer-val').textContent = '--:--:--';
+    return;
+  }
   const left = A.deadline - Date.now();
   $('#timer-val').textContent = clock(left);
   $('#timer').className = `timer ${left < 2 * 60000 ? 'crit' : left < 10 * 60000 ? 'warn' : ''}`;
   $('#timer').querySelector('small').textContent = left <= 0 ? 'Contest over' : 'Time left';
-  if (left <= 0 && !A.ended) {
-    A.ended = true;
-    A.editor?.setReadOnly(true);
-    setButtons();
-    toast('Time is up. Your code is saved; running and submitting are now closed.', 'warn');
+
+  if (left <= 0) {
+    if (!A.ended) {
+      A.ended = true;
+      A.editor?.setReadOnly(true);
+      setButtons();
+      toast('Time is up. Your code is saved; running and submitting are now closed.', 'warn');
+    }
+  } else {
+    // Timer is running with active time left!
+    // If A.ended was set to true (e.g. from restarted test or unblocked student), restore active state!
+    if (A.ended && !A.kicked && !A.lockdownViolated && !A.paused && !A.waiting) {
+      A.ended = false;
+      A.editor?.setReadOnly(false);
+      setButtons();
+    }
   }
 }
 
