@@ -266,6 +266,7 @@ function classify(r, expected, limit) {
     case 'OK': return { ...base, verdict: sameOutput(r.stdout, expected) ? 'AC' : 'WA' };
     case 'CE': return { ...base, verdict: 'CE' };
     case 'OLE': return { ...base, verdict: 'OLE' };
+    case 'TLE': return { ...base, verdict: 'TLE', timeMs: Math.max(base.timeMs, limit) };
     case 'UNSUPPORTED': return { ...base, verdict: 'NJ' };
     default: return { ...base, verdict: 'RE' };
   }

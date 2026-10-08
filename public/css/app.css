@@ -516,6 +516,42 @@ button { cursor: pointer; }
   line-height: 1.5;
 }
 
+/* Announcement Banner — stays until the organisers clear it or the student hides it */
+.announce-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 18px;
+  background: var(--info-soft);
+  border-bottom: 1px solid rgba(121, 168, 212, 0.35);
+  font-size: 14px;
+  animation: banner-in 0.25s var(--ease);
+}
+.announce-banner[hidden] { display: none; }
+.announce-label {
+  flex: none;
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--info);
+  border: 1px solid rgba(121, 168, 212, 0.35);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.announce-text { flex: 1; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.announce-close {
+  flex: none;
+  background: none;
+  border: 0;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.announce-close:hover { background: rgba(121, 168, 212, 0.15); color: var(--text); }
+
 /* Fullscreen Banner */
 .fullscreen-banner {
   display: flex;

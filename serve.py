@@ -330,6 +330,7 @@ def get_contest_state(roll=None):
         "extraTimeMin": extra_time_min,
         "endTime": end_time,
         "announcement": announcement,
+        "epoch": state.get("epoch") or "0",
         "now": now_ms,
         "timeLeftMs": time_left,
         "lockdownPolicy": get_lockdown_policy()
@@ -374,7 +375,8 @@ def update_contest_timer(action, minutes=0):
             added_ms = int(minutes) * 60000
             extra_time_min += int(minutes)
             if status == "running":
-                end_time += added_ms
+                # If time already ran out, the extra minutes count from now.
+                end_time = max(end_time, now_ms) + added_ms
             elif status == "paused":
                 paused_left += added_ms
             elif status == "ended":
@@ -504,6 +506,10 @@ def get_submission_source(sub_id):
 def reset_contest(wipe_submissions=True, reset_timer=True):
     with _lock:
         if wipe_submissions:
+            # New epoch tells contestant browsers to drop the results they keep locally.
+            db.execute(
+                "INSERT INTO contest_state (key, value) VALUES ('epoch', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+                (str(int(time.time() * 1000)),), commit=True)
             db.execute("DELETE FROM submissions;", commit=True)
             db.execute("DELETE FROM kicked_users;", commit=True)
             db.execute("DELETE FROM security_violations;", commit=True)
@@ -514,15 +520,47 @@ def reset_contest(wipe_submissions=True, reset_timer=True):
     return {"ok": True}
 
 
+def _as_int(v, default=0):
+    try:
+        return int(float(v))
+    except (TypeError, ValueError):
+        return default
+
+
+def _as_str(v, limit):
+    return str(v if v is not None else "")[:limit]
+
+
 def save_submission(sub):
-    """Store submission in database and append to jsonl log."""
+    """Store submission in database and append to jsonl log.
+
+    The endpoint is public, so every field is coerced to the type the admin
+    dashboard expects (a string in `passed` would otherwise be rendered as HTML)."""
+    sub = {
+        **sub,
+        "roll": _as_str(sub.get("roll"), 32).strip().upper(),
+        "name": _as_str(sub.get("name"), 120),
+        "problem": _as_str(sub.get("problem"), 16),
+        "lang": _as_str(sub.get("lang"), 16),
+        "verdict": _as_str(sub.get("verdict"), 8),
+        "passed": _as_int(sub.get("passed")),
+        "total": _as_int(sub.get("total")),
+        "timeMs": _as_int(sub.get("timeMs")),
+        "failedTest": _as_int(sub.get("failedTest")),
+        "source": _as_str(sub.get("source"), 200000),
+        "at": _as_int(sub.get("at")),
+    }
     with _lock:
+        # Retried uploads (flaky lab Wi-Fi) must not count twice.
+        if db.query_row("SELECT id FROM submissions WHERE roll = ? AND problem = ? AND submitted_at = ?",
+                        (sub["roll"], sub["problem"], sub["at"])):
+            return
         db.execute("""
             INSERT INTO submissions 
             (roll, name, problem, lang, verdict, passed, total, time_ms, failed_test, source, submitted_at, received_at, ip)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            str(sub.get("roll", "")).upper(),
+            sub["roll"],
             sub.get("name", ""),
             sub.get("problem", ""),
             sub.get("lang", ""),
@@ -873,6 +911,8 @@ def scoreboard(problems):
         roll = str(r.get("roll", "")).upper()
         if roll in kicked_rolls:
             continue
+        if problems and r.get("problem") not in problems:
+            continue   # problem was deleted — don't let it count toward solved or tie-breaks
 
         c = best.setdefault(roll, {
             "name": r.get("name", ""),
@@ -1432,16 +1472,19 @@ class Handler(SimpleHTTPRequestHandler):
 
         # Scoreboard
         if req_path == "/api/scoreboard":
-            return self.json(HTTPStatus.OK, scoreboard(load_problems()))
+            return self.json(HTTPStatus.OK, {"rows": scoreboard(load_problems()), "updatedAt": int(time.time() * 1000)})
 
         # Admin APIs (Protected)
         if req_path == "/api/admin/state":
             if not self.is_admin():
                 return self.json(HTTPStatus.UNAUTHORIZED, {"error": "Admin password required"})
+            with _lock:
+                totals = db.query_row("SELECT COUNT(*), SUM(CASE WHEN verdict = 'AC' THEN 1 ELSE 0 END) FROM submissions")
             return self.json(HTTPStatus.OK, {
                 "contest": get_contest_state(),
                 "kicked": get_kicked_users(),
-                "violations": get_security_violations()
+                "violations": get_security_violations(),
+                "totals": {"submissions": int(totals[0] or 0), "accepted": int(totals[1] or 0)}
             })
 
         if req_path == "/api/admin/violations":
@@ -1450,6 +1493,9 @@ class Handler(SimpleHTTPRequestHandler):
             return self.json(HTTPStatus.OK, {"violations": get_security_violations()})
 
         if req_path in ("/api/submissions", "/api/admin/submissions"):
+            # Lists every contestant's IP and verdicts — admin only.
+            if not self.is_admin():
+                return self.json(HTTPStatus.UNAUTHORIZED, {"error": "Admin password required"})
             return self.json(HTTPStatus.OK, {"submissions": get_recent_submissions()})
 
         if req_path == "/api/admin/kicked":

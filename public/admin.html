@@ -899,13 +899,15 @@
   let submissionsData = [];
   let kickedData = [];
   let violationsData = [];
+  let totals = null;
+  let lastLiveAnnouncement = null;
   let questionsData = [];
   let problemsList = [...PROBLEMS];
   let editingQuestionId = null;
   let editingSamples = [];
   let initialTestsRaw = '';
   let soundAlertEnabled = true;
-  let lastSeenViolationId = 0;
+  let lastSeenViolationId = null;   // null until the first load, so a reload doesn't replay old alerts
   let searchTerm = '';
 
   // Synthesized Web Audio chime for real-time escape notifications
@@ -1052,10 +1054,13 @@
         const data = await stateRes.value.json();
         contestState = data.contest;
         kickedData = data.kicked || [];
+        totals = data.totals || null;
         const newViolations = data.violations || [];
 
         // Check for freshly reported active violations to trigger sound chime & urgent toast
-        if (newViolations.length) {
+        if (lastSeenViolationId === null) {
+          lastSeenViolationId = Math.max(0, ...newViolations.map(v => v.id));
+        } else if (newViolations.length) {
           const fresh = newViolations.filter(v => v.id > lastSeenViolationId && v.status === 'active');
           if (fresh.length) {
             playAlertChime();
@@ -1100,10 +1105,13 @@
     statusPill.textContent = contestState.status.toUpperCase();
     statusPill.className = `status-badge status-${contestState.status}`;
 
+    // Only mirror the live announcement when it actually changes on the server,
+    // so a half-written draft survives the 3 s poll (and clicking elsewhere).
     const annInput = document.getElementById('announcement-input');
-    // Don't clobber what the admin is typing on every 3s poll
-    if (contestState.announcement && document.activeElement !== annInput) {
-      annInput.value = contestState.announcement;
+    const liveAnnouncement = contestState.announcement || '';
+    if (liveAnnouncement !== lastLiveAnnouncement) {
+      lastLiveAnnouncement = liveAnnouncement;
+      if (document.activeElement !== annInput) annInput.value = liveAnnouncement;
     }
     if (contestState.lockdownPolicy) {
       updateLockdownPolicyUI(contestState.lockdownPolicy);
@@ -1112,8 +1120,8 @@
 
   function updateStats() {
     document.getElementById('stat-contestants').textContent = scoreboardData.length;
-    document.getElementById('stat-subs').textContent = submissionsData.length;
-    const ac = submissionsData.filter(s => s.verdict === 'AC').length;
+    document.getElementById('stat-subs').textContent = totals ? totals.submissions : submissionsData.length;
+    const ac = totals ? totals.accepted : submissionsData.filter(s => s.verdict === 'AC').length;
     document.getElementById('stat-ac').textContent = ac;
     document.getElementById('stat-kicked').textContent = kickedData.length;
     document.getElementById('kicked-count').textContent = kickedData.length;
@@ -1128,7 +1136,7 @@
   function updateScoreboard() {
     const tbody = document.getElementById('leaderboard-tbody');
     const filtered = scoreboardData.filter(r =>
-      !searchTerm || r.name.toLowerCase().includes(searchTerm) || r.roll.toLowerCase().includes(searchTerm)
+      !searchTerm || String(r.name || '').toLowerCase().includes(searchTerm) || String(r.roll || '').toLowerCase().includes(searchTerm)
     );
 
     if (!filtered.length) {
@@ -1192,15 +1200,15 @@
 
       return `
         <tr>
-          <td class="num muted">${s.id}</td>
+          <td class="num muted">${Number(s.id)}</td>
           <td class="num">${timeStr}</td>
           <td class="strong">${escapeHtml(s.name)}</td>
           <td class="mono muted">${escapeHtml(s.roll)}</td>
           <td class="strong">${escapeHtml(s.problem)}</td>
           <td class="muted">${escapeHtml(s.lang)}</td>
           <td><span class="badge ${badgeCls}">${escapeHtml(s.verdict)}</span></td>
-          <td class="right num">${s.passed}/${s.total}</td>
-          <td class="right num">${s.time_ms ? s.time_ms.toFixed(0) + ' ms' : '—'}</td>
+          <td class="right num">${Number(s.passed) || 0}/${Number(s.total) || 0}</td>
+          <td class="right num">${Number(s.time_ms) ? Math.round(Number(s.time_ms)) + ' ms' : '—'}</td>
           <td class="right">
             <button class="btn-inspect-sm btn-view-code" data-id="${s.id}" data-roll="${escapeHtml(s.roll)}" data-problem="${escapeHtml(s.problem)}">👁️ View</button>
           </td>
@@ -1257,13 +1265,15 @@
   async function unkickContestant(roll) {
     if (!confirm(`Restore contestant ${roll} and permit them to resume the contest?`)) return;
     try {
-      const res = await api('/api/admin/unkick', {
+      const res = await api('/api/admin/unblock', {
         method: 'POST',
         body: { roll }
       });
       if (res.ok) {
         toast(`Restored ${roll}`, 'ok');
         loadAll();
+      } else {
+        toast(`Could not restore ${roll} (HTTP ${res.status})`, 'bad');
       }
     } catch (e) {
       toast('Failed to restore contestant', 'bad');

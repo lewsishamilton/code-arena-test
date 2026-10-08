@@ -238,6 +238,8 @@ function enterArena(session) {
   const state = store.get(key, null) || { startedAt: Date.now(), code: {}, lang: CONFIG.defaultLanguage, problem: 0, subs: [] };
   state.lang = LANGUAGES[state.lang] ? state.lang : 'py';
   state.problem = Math.min(state.problem || 0, PROBLEMS.length - 1);
+  // A reload in the middle of judging leaves a "Judging…" row that would never finish.
+  for (const s of state.subs || []) if (s.verdict === 'PENDING') { s.verdict = 'NJ'; s.passed = 0; }
 
   A = {
     session, state, editor: null, busy: false, ended: false,
@@ -370,11 +372,15 @@ function standing(subs, startedAt) {
   let score = 0, solved = 0;
   for (const p of PROBLEMS) {
     const mine = subs.filter(s => s.problem === p.id).sort((a, b) => a.at - b.at);
-    let solvedAt = null;
+    // Same rule as the server: count attempts up to and including the first AC.
+    // IE results are never sent to the server, so they don't count here either.
+    let solvedAt = null, attempts = 0;
     for (const s of mine) {
+      if (s.verdict === 'PENDING' || s.verdict === 'IE') continue;
+      attempts++;
       if (s.verdict === 'AC') { solvedAt = s.at; break; }
     }
-    per[p.id] = { attempts: mine.filter(s => s.verdict !== 'PENDING').length, solvedAt };
+    per[p.id] = { attempts, solvedAt };
     if (solvedAt) {
       solved++; score += p.points;
     }
@@ -390,6 +396,12 @@ const verdictBadge = v => {
   return `<span class="badge ${cls}" title="${esc(meta.label)}">${esc(meta.label)}</span>`;
 };
 
+/** "Solved at" / submission time as elapsed contest time; time of day if the start is unknown. */
+const sinceStart = at => {
+  const start = A.contestStart || 0;
+  return start && at >= start ? clock(at - start) : timeOfDay(at);
+};
+
 function renderStatus() {
   const { per, score, solved } = standing(A.state.subs, A.state.startedAt);
   const board = A.scoreboard?.rows || null;
@@ -402,7 +414,7 @@ function renderStatus() {
       const st = per[p.id];
       const status = st.solvedAt ? '<span class="badge badge-ok">Solved</span>' : st.attempts ? '<span class="badge badge-info">Attempted</span>' : '<span class="badge plain">Not tried</span>';
       return `<tr><td class="strong">${esc(p.id)}. ${esc(p.title)}</td><td>${status}</td><td class="right num">${st.attempts}</td>
-        <td class="right num">${st.solvedAt ? clock(st.solvedAt - A.state.startedAt) : '—'}</td><td class="right num">${st.solvedAt ? p.points : 0} / ${p.points}</td></tr>`;
+        <td class="right num">${st.solvedAt ? sinceStart(st.solvedAt) : '—'}</td><td class="right num">${st.solvedAt ? p.points : 0} / ${p.points}</td></tr>`;
     }).join('')}</tbody></table></div>`;
 
   let boardHTML;
@@ -422,7 +434,7 @@ function renderStatus() {
   const subs = [...A.state.subs].reverse();
   const subsHTML = subs.length ? `<div class="panel table-wrap"><table class="table">
     <thead><tr><th>#</th><th>Time</th><th>Problem</th><th>Language</th><th>Verdict</th><th class="right">Tests</th><th class="right">Runtime</th></tr></thead>
-    <tbody>${subs.map(s => `<tr><td class="num">${s.n}</td><td class="num">${clock(s.at - A.state.startedAt)}</td><td class="strong">${esc(s.problem)}</td>
+    <tbody>${subs.map(s => `<tr><td class="num">${s.n}</td><td class="num">${sinceStart(s.at)}</td><td class="strong">${esc(s.problem)}</td>
       <td>${esc(LANGUAGES[s.lang]?.label || s.lang)}</td><td>${verdictBadge(s.verdict)}${s.failedTest && !['AC', 'NJ'].includes(s.verdict) ? ` <span class="muted">on test ${s.failedTest}</span>` : ''}</td>
       <td class="right num">${s.verdict === 'PENDING' ? '…' : `${s.passed}/${s.total}`}</td><td class="right num">${s.timeMs != null && s.verdict !== 'PENDING' ? s.timeMs + ' ms' : '—'}</td></tr>`).join('')}</tbody></table></div>`
     : '<div class="panel"><p class="empty">No submissions yet. Submit a solution to have it judged against the hidden tests.</p></div>';
@@ -443,18 +455,23 @@ function renderStatus() {
 }
 
 /* ---------- Result sync with serve.py (optional) ---------- */
-async function flushOutbox() {
-  if (!CONFIG.api.submissions) return;
-  const key = `outbox.${A.session.roll}`;
-  const outbox = store.get(key, []);
-  while (outbox.length) {
-    try {
-      const res = await fetch(CONFIG.api.submissions, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(outbox[0]) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      outbox.shift();
-      store.set(key, outbox);
-    } catch { break; }
-  }
+let flushing = null;
+function flushOutbox() {
+  if (!CONFIG.api.submissions) return Promise.resolve();
+  // One flush at a time, or two callers would POST the same queued result twice.
+  flushing ||= (async () => {
+    const key = `outbox.${A.session.roll}`;
+    const outbox = store.get(key, []);
+    while (outbox.length) {
+      try {
+        const res = await fetch(CONFIG.api.submissions, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(outbox[0]) });
+        if (!res.ok && res.status !== 403) throw new Error(`HTTP ${res.status}`);   // 403 = disqualified; retrying won't help
+        outbox.shift();
+        store.set(key, outbox);
+      } catch { break; }
+    }
+  })().finally(() => { flushing = null; });
+  return flushing;
 }
 
 /* =========================================================================
@@ -568,7 +585,6 @@ function setupNetworkMonitor() {
     toast('🌐 Network connection restored · Synchronizing data...', 'ok');
     flushOutbox();
     flushPendingViolations();
-    pollScoreboard();
   });
 
   window.addEventListener('offline', () => {
@@ -634,11 +650,21 @@ async function handleLockdownViolation(violation) {
   };
 
   try {
-    await fetch('/api/security/violation', {
+    const res = await fetch('/api/security/violation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
+    const result = await res.json().catch(() => ({}));
+    if (result.blocked) A.serverKicked = true;
+    else if (result.ignored) {
+      // The admin switched this rule off a moment ago — don't leave the student locked out.
+      A.lockdownViolated = false;
+      A.ended = false;
+      A.editor?.setReadOnly(false);
+      hideLockdownViolationUI();
+      setButtons();
+    }
   } catch (err) {
     // If offline, store violation to deliver once connection recovers
     const pending = store.get('pending_violations', []);
@@ -760,6 +786,7 @@ function handleContestState(state) {
 
   // 1. Contestant is currently Kicked / Disqualified
   if (state.isKicked) {
+    A.serverKicked = true;
     if (!A.kicked) {
       A.kicked = true;
       A.ended = true;
@@ -772,11 +799,11 @@ function handleContestState(state) {
       if (state.isSecurityViolation && state.violation) {
         showLockdownViolationUI(state.violation);
       } else {
-        modal({
+        confirmDialog({
           title: '🚫 Contest Disqualification',
           body: `<p style="color:var(--danger);font-weight:600;font-size:16px;">You have been disqualified by the administrator.</p><p class="muted">Reason: ${esc(state.kickReason || 'Removed by invigilator')}</p><p>Your session has been terminated and further submissions are blocked.</p>`,
-          confirmText: 'Acknowledge',
-          cancelText: ''
+          confirm: 'Acknowledge',
+          tone: 'danger'
         });
       }
     }
@@ -784,8 +811,11 @@ function handleContestState(state) {
   }
 
   // 2. Unblock / Pardon: contestant was previously blocked, but admin unblocked/pardoned them!
+  // A state response that left the server before our violation POST landed also says
+  // isKicked:false — only a block the server had confirmed can be lifted here.
   const wasBlocked = A.kicked || A.lockdownViolated;
-  if (!state.isKicked && wasBlocked) {
+  if (!state.isKicked && wasBlocked && A.serverKicked) {
+    A.serverKicked = false;
     A.kicked = false;
     A.lockdownViolated = false;
     A.unblockedAt = Date.now();
@@ -795,12 +825,34 @@ function handleContestState(state) {
   }
 
   // 3. Announcements
-  if (state.announcement && state.announcement !== A.lastAnnouncement) {
-    A.lastAnnouncement = state.announcement;
-    toast(`📢 Announcement: ${state.announcement}`, 'info');
+  const announcement = state.announcement || '';
+  if (announcement !== (A.lastAnnouncement || '')) {
+    A.lastAnnouncement = announcement;
+    A.announceHidden = false;
+    if (announcement) toast(`📢 Announcement: ${esc(announcement)}`, 'info');
+  }
+  $('#announce-text').textContent = announcement;
+  $('#announce-banner').hidden = !announcement || A.announceHidden;
+
+  // 4. Contest wiped by the organisers: drop results kept in this browser
+  if (state.epoch) {
+    const key = `epoch.${A.session.roll}`;
+    const known = store.get(key, null);
+    if (known && known !== state.epoch) {
+      A.state.subs = [];
+      A.hidden = {};
+      A.save();
+      store.set(`outbox.${A.session.roll}`, []);
+      renderProblemTabs();
+      toast('The organisers reset the contest. Your earlier results were cleared (your code is kept).', 'info');
+    }
+    store.set(key, state.epoch);
   }
 
-  // 4. Timer synchronization & Contest End Time
+  // 5. Timer synchronization & Contest End Time
+  if (state.now) A.skew = state.now - Date.now();   // lab PCs' clocks are often minutes off
+  A.serverStatus = state.status;
+  if (state.startTime) A.contestStart = state.startTime;
   if (state.endTime) {
     if (A.serverEndTime && state.endTime > A.serverEndTime) {
       const extraMin = Math.round((state.endTime - A.serverEndTime) / 60000);
@@ -810,8 +862,8 @@ function handleContestState(state) {
     A.deadline = state.endTime;
   }
 
-  // 5. Contest Lifecycle State: paused, waiting, ended, or active running!
-  const now = Date.now();
+  // 6. Contest Lifecycle State: paused, waiting, ended, or active running!
+  const now = serverNow();
   const timeRemaining = !!(A.deadline && A.deadline > now);
 
   if (state.status === 'paused') {
@@ -841,7 +893,6 @@ function handleContestState(state) {
     A.paused = false;
     A.waiting = false;
     A.ended = false;
-    A.busy = false;
 
     if (needsRestore) {
       A.editor?.setReadOnly(false);
@@ -858,6 +909,8 @@ function handleContestState(state) {
 }
 
 /* ---------- Timer ---------- */
+const serverNow = () => Date.now() + (A?.skew || 0);
+
 function tick() {
   if (A.kicked) {
     $('#timer-val').textContent = 'DISQUALIFIED';
@@ -881,7 +934,7 @@ function tick() {
     $('#timer-val').textContent = '--:--:--';
     return;
   }
-  const left = A.deadline - Date.now();
+  const left = A.deadline - serverNow();
   $('#timer-val').textContent = clock(left);
   $('#timer').className = `timer ${left < 2 * 60000 ? 'crit' : left < 10 * 60000 ? 'warn' : ''}`;
   $('#timer').querySelector('small').textContent = left <= 0 ? 'Contest over' : 'Time left';
@@ -896,7 +949,7 @@ function tick() {
   } else {
     // Timer is running with active time left!
     // If A.ended was set to true (e.g. from restarted test or unblocked student), restore active state!
-    if (A.ended && !A.kicked && !A.lockdownViolated && !A.paused && !A.waiting) {
+    if (A.ended && A.serverStatus === 'running' && !A.kicked && !A.lockdownViolated && !A.paused && !A.waiting) {
       A.ended = false;
       A.editor?.setReadOnly(false);
       setButtons();
@@ -1049,8 +1102,10 @@ function startJob(title) {
   log(`<span class="hl">${esc(title)}</span>`);
 }
 
+const canJudge = () => !(A.busy || A.ended || A.paused || A.waiting || A.kicked || A.lockdownViolated);
+
 async function runSamples() {
-  if (A.busy || A.ended) return;
+  if (!canJudge()) return;
   const p = problem(), lang = A.state.lang;
   startJob(`Run sample tests · Problem ${p.id} · ${LANGUAGES[lang].label}`);
   const tests = p.samples.map(s => ({ input: s.input, output: s.output }));
@@ -1065,21 +1120,25 @@ async function runSamples() {
 }
 
 async function hiddenTests(p) {
-  if (!A.hidden[p.id]) {
+  // Fetched on every submit so a test fixed by the organisers applies straight away;
+  // the last copy is kept only as a fallback for a brief network drop.
+  try {
     const res = await fetch(`data/tests/${encodeURIComponent(p.id)}.json`, { cache: 'no-store' });
     if (!res.ok) throw new Error(`Could not load the hidden tests (HTTP ${res.status}). Tell an invigilator.`);
     A.hidden[p.id] = await res.json();
+  } catch (e) {
+    if (!A.hidden[p.id]) throw e;
   }
   return A.hidden[p.id];
 }
 
 async function submitSolution() {
-  if (A.busy || A.ended) return;
+  if (!canJudge()) return;
   const p = problem(), lang = A.state.lang, source = A.editor.getValue();
   if (!source.trim()) return toast('Your editor is empty.', 'warn');
   startJob(`Submit · Problem ${p.id} · ${LANGUAGES[lang].label}`);
 
-  const sub = { n: A.state.subs.length + 1, at: Date.now(), problem: p.id, lang, verdict: 'PENDING', passed: 0, total: 0, timeMs: null, failedTest: null };
+  const sub = { n: A.state.subs.length + 1, at: serverNow(), problem: p.id, lang, verdict: 'PENDING', passed: 0, total: 0, timeMs: null, failedTest: null };
   A.state.subs.push(sub);
   A.save();
   renderStatus();
@@ -1128,6 +1187,7 @@ function setPanel(name) {
 }
 
 function wireArena() {
+  $('#announce-close').addEventListener('click', () => { A.announceHidden = true; $('#announce-banner').hidden = true; });
   $('#q-tabs').addEventListener('click', e => {
     const btn = e.target.closest('[data-q]');
     if (!btn || Number(btn.dataset.q) === A.state.problem) return;
